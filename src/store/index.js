@@ -40,6 +40,13 @@ import adminLoginHistory  from '../features/admin/adminLoginHistorySlice';
 // every (module, dataset) pair via keyed state).
 import adminModuleData    from '../features/admin/adminModuleDataSlice';
 
+// Control plane (Phases 2-10): finding governance, API control, scoring,
+// approvals. These layer on top of the existing admin surface.
+import adminFindings      from '../features/admin/adminFindingsSlice';
+import adminApiControl    from '../features/admin/adminApiControlSlice';
+import adminScoring       from '../features/admin/adminScoringSlice';
+import adminApprovals     from '../features/admin/adminApprovalsSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -78,6 +85,11 @@ export const store = configureStore({
         adminLoginHistory,
         // Pass 3
         adminModuleData,
+        // Control plane (Phases 2-10)
+        adminFindings,
+        adminApiControl,
+        adminScoring,
+        adminApprovals,
     },
 });
 

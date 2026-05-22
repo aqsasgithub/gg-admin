@@ -5,6 +5,7 @@ import {
     CreditCard, Server, ScrollText, Activity, AlertTriangle, ScanLine,
     Mail, Trash2, Plug, BugPlay, ToggleRight, Megaphone, Heart, ListTree,
     UserCog, DollarSign, Tag, Power, Ticket, Clock, ShieldCheck, Layers,
+    ShieldHalf, Radio, Gauge, ClipboardCheck,
 } from 'lucide-react';
 import { selectAdminCapabilities, selectAdminRoles } from '../../features/auth/authSlice';
 
@@ -88,6 +89,15 @@ const GROUPS = [
             { to: '/audit',     label: 'Audit Log', icon: ScrollText, cap: 'audit.read' },
             { to: '/activity',  label: 'Activity',  icon: Activity,   cap: 'activity.read' },
             { to: '/privacy',   label: 'Privacy ops', icon: Trash2,   cap: 'privacy.read' },
+        ],
+    },
+    {
+        label: 'Control plane',
+        items: [
+            { to: '/findings',    label: 'Findings Control', icon: ShieldHalf,     cap: 'findings.read' },
+            { to: '/api-control', label: 'API Control',      icon: Radio,          cap: 'apicontrol.read' },
+            { to: '/scoring',     label: 'Scoring Control',  icon: Gauge,          cap: 'scoring.read' },
+            { to: '/approvals',   label: 'Approvals',        icon: ClipboardCheck, cap: 'approvals.read' },
         ],
     },
     {

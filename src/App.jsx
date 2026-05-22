@@ -57,6 +57,12 @@ import CloudSecurityPage         from './pages/CloudSecurityPage';
 import CompliancePage            from './pages/CompliancePage';
 import ModuleDatasetPage         from './pages/ModuleDatasetPage';
 
+// Control plane (Phases 2-10)
+import FindingsControlPage       from './pages/FindingsControlPage';
+import ApiControlCentrePage      from './pages/ApiControlCentrePage';
+import ScoringControlPage        from './pages/ScoringControlPage';
+import ApprovalsPage             from './pages/ApprovalsPage';
+
 /**
  * Top-level routing. Routes are categorised in the Sidebar; this file
  * maps URLs to page components. Capability gating is enforced
@@ -134,6 +140,12 @@ export default function App() {
 
                     {/* Incident */}
                     <Route path="/incident"           element={<IncidentResponsePage />} />
+
+                    {/* Control plane (Phases 2-10) */}
+                    <Route path="/findings"      element={<FindingsControlPage />} />
+                    <Route path="/api-control"   element={<ApiControlCentrePage />} />
+                    <Route path="/scoring"       element={<ScoringControlPage />} />
+                    <Route path="/approvals"     element={<ApprovalsPage />} />
                 </Route>
             </Route>
 
