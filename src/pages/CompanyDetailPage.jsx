@@ -18,6 +18,8 @@ import {
     fetchCompanyEntitlements, replaceEntitlements, fetchPlans, updateCompanyLicense,
     selectCompanyEntitlements, selectPlans,
 } from '../features/admin/adminLicensingSlice';
+// Pass D / Task 5b.2 — revoke + manual-issue on company detail.
+import { revokeLicense, approveLicenseApplication, rejectLicenseApplication } from '../features/admin/adminLicenseApplicationsSlice';
 import {
     fetchCompanyDomains, addCompanyDomain, bulkAddDomains,
     toggleDomainScope, removeDomain,
@@ -151,7 +153,7 @@ export default function CompanyDetailPage() {
 
 function OverviewTab({ companyId, detail }) {
     const dispatch = useDispatch();
-    const { company, license, stats, recent_activity } = detail;
+    const { company, license, stats, recent_activity, pending_application, applications_history } = detail;
     const [confirm, setConfirm] = useState(null);
 
     const doSuspend = async (reason) => {
@@ -163,6 +165,14 @@ function OverviewTab({ companyId, detail }) {
         await dispatch(reinstateCompany(companyId));
         setConfirm(null);
         dispatch(fetchAdminCompany(companyId));
+    };
+    // Pass D / Task 5b.2 — revoke license from company-detail view.
+    const doRevoke = async (reason) => {
+        if (license?.id) {
+            await dispatch(revokeLicense({ id: license.id, admin_note: reason }));
+            dispatch(fetchAdminCompany(companyId));
+        }
+        setConfirm(null);
     };
 
     const isSuspended = license?.status === 'suspended';
@@ -186,6 +196,38 @@ function OverviewTab({ companyId, detail }) {
                         <Field k="Scans / mo" v={`${license?.scans_per_month_limit ?? '—'}`} />
                         <Field k="Expires" v={license?.expires_at ? formatDistanceToNow(parseISO(license.expires_at), { addSuffix: true }) : 'never'} />
                     </dl>
+                    {/* Pass D / Task 5b.2 — Revoke + Manually Issue actions
+                        on the company detail view (outside the application
+                        review flow). Edit License opens the existing modal
+                        on the Licensing tab. */}
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                        {license?.status === 'active' && (
+                            <button
+                                type="button"
+                                onClick={() => setConfirm({ type: 'revoke' })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md"
+                            >
+                                <Pause size={12} /> Revoke license
+                            </button>
+                        )}
+                        {!license && (
+                            <button
+                                type="button"
+                                onClick={() => navigate(`/companies/${companyId}?tab=licensing`)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-guardian-navy bg-guardian-navy/5 hover:bg-guardian-navy/10 border border-guardian-navy/20 rounded-md"
+                            >
+                                <Plus size={12} /> Issue license manually
+                            </button>
+                        )}
+                        {license && (
+                            <Link
+                                to={`/companies/${companyId}?tab=licensing`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-guardian-navy"
+                            >
+                                Edit / change plan →
+                            </Link>
+                        )}
+                    </div>
                 </Card>
 
                 <Card title="Operations">
@@ -210,6 +252,14 @@ function OverviewTab({ companyId, detail }) {
                 </Card>
             </div>
 
+            {/* Task 1 — License application surface inside the company-detail
+                License tab. Pending application (act on inline) + history. */}
+            <LicenseApplicationsBlock
+                companyId={companyId}
+                pendingApplication={pending_application}
+                applicationsHistory={applications_history || []}
+            />
+
             <Card title="Recent activity">
                 <Link to={`/activity?company=${companyId}`} className="text-xs text-guardian-navy hover:underline mb-2 inline-block">
                     View full activity →
@@ -233,6 +283,10 @@ function OverviewTab({ companyId, detail }) {
                 description="All users on this tenant will be locked out immediately."
                 confirmLabel="Suspend" variant="destructive" requireReason
                 onCancel={() => setConfirm(null)} onConfirm={doSuspend} />
+            <AdminConfirmModal open={confirm?.type === 'revoke'} title={`Revoke ${company.name}'s license?`}
+                description="Customer module API calls will start returning 402 (Payment Required) immediately. They can re-apply for a new license."
+                confirmLabel="Revoke license" variant="destructive" requireReason
+                onCancel={() => setConfirm(null)} onConfirm={doRevoke} />
             <AdminConfirmModal open={confirm?.type === 'reinstate'} title={`Reinstate ${company.name}?`}
                 confirmLabel="Reinstate"
                 onCancel={() => setConfirm(null)} onConfirm={doReinstate} />
@@ -700,5 +754,150 @@ function ModalActions({ onCancel, onSubmit, submitLabel, submitDisabled }) {
                 {submitLabel}
             </button>
         </div>
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// LicenseApplicationsBlock — Task 1 (Pass F).
+// Renders the company's license-application surface inside the existing
+// company-detail Overview tab: pending application card (inline approve /
+// reject) + applications history list. Active application transitions in
+// place via fetchAdminCompany after the action.
+// ───────────────────────────────────────────────────────────────────────
+function LicenseApplicationsBlock({ companyId, pendingApplication, applicationsHistory }) {
+    const dispatch = useDispatch();
+    const [approveBusy, setApproveBusy] = useState(false);
+    const [rejectBusy,  setRejectBusy]  = useState(false);
+    const [rejectNote,  setRejectNote]  = useState('');
+    const [showReject,  setShowReject]  = useState(false);
+    const [adminNote,   setAdminNote]   = useState('');
+
+    const refresh = () => dispatch(fetchAdminCompany(companyId));
+
+    const onApprove = async () => {
+        if (!pendingApplication) return;
+        setApproveBusy(true);
+        try {
+            await dispatch(approveLicenseApplication({
+                id: pendingApplication.id,
+                payload: { admin_note: adminNote || undefined },
+            }));
+            setAdminNote('');
+            refresh();
+        } finally { setApproveBusy(false); }
+    };
+
+    const onReject = async () => {
+        if (!pendingApplication || rejectNote.trim().length < 1) return;
+        setRejectBusy(true);
+        try {
+            await dispatch(rejectLicenseApplication({
+                id: pendingApplication.id,
+                admin_note: rejectNote.trim(),
+            }));
+            setRejectNote('');
+            setShowReject(false);
+            refresh();
+        } finally { setRejectBusy(false); }
+    };
+
+    return (
+        <Card title="License application">
+            {pendingApplication ? (
+                <div className="space-y-3">
+                    <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-sm">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-amber-900 font-medium">
+                                    Pending application · <span className="capitalize">{pendingApplication.license_type_slug}</span>
+                                </div>
+                                <div className="text-xs text-amber-800/80 mt-0.5">
+                                    {pendingApplication.applicant?.email ?? pendingApplication.applicant_user_id}
+                                    {' · applied '}
+                                    {pendingApplication.applied_at
+                                        ? formatDistanceToNow(parseISO(pendingApplication.applied_at), { addSuffix: true })
+                                        : '—'}
+                                </div>
+                                {pendingApplication.message && (
+                                    <div className="mt-2 text-xs text-amber-900 italic">"{pendingApplication.message}"</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    {showReject ? (
+                        <div className="space-y-2">
+                            <textarea
+                                value={rejectNote}
+                                onChange={(e) => setRejectNote(e.target.value)}
+                                rows={3}
+                                placeholder="Reason — shown to the customer"
+                                className="w-full text-sm p-2 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-red-200"
+                            />
+                            <div className="flex items-center gap-2">
+                                <button type="button" onClick={onReject}
+                                    disabled={rejectBusy || rejectNote.trim().length < 1}
+                                    className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded">
+                                    Reject application
+                                </button>
+                                <button type="button" onClick={() => { setShowReject(false); setRejectNote(''); }}
+                                    className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900">
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <button type="button" onClick={onApprove} disabled={approveBusy}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded">
+                                {approveBusy ? 'Approving…' : 'Approve'}
+                            </button>
+                            <button type="button" onClick={() => setShowReject(true)}
+                                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded">
+                                Reject
+                            </button>
+                            <input
+                                type="text"
+                                value={adminNote}
+                                onChange={(e) => setAdminNote(e.target.value)}
+                                placeholder="Optional approval note"
+                                className="flex-1 text-xs p-1.5 border border-slate-300 rounded"
+                            />
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <p className="text-sm text-slate-500">
+                    No pending application. The customer can apply for a new subscription from their License page.
+                </p>
+            )}
+
+            {applicationsHistory.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-slate-100">
+                    <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-2">Applications history</h4>
+                    <ul className="space-y-1.5 text-xs">
+                        {applicationsHistory.map((a) => (
+                            <li key={a.id} className="flex items-center justify-between gap-2">
+                                <span className="text-slate-700">
+                                    <span className="capitalize font-medium">{a.license_type_slug}</span>
+                                    {' · '}
+                                    <span className={
+                                        a.status === 'approved' ? 'text-emerald-700' :
+                                        a.status === 'rejected' ? 'text-red-700' :
+                                        'text-slate-500'
+                                    }>{a.status}</span>
+                                </span>
+                                <span className="text-slate-400">
+                                    {a.reviewed_at
+                                        ? formatDistanceToNow(parseISO(a.reviewed_at), { addSuffix: true })
+                                        : a.applied_at
+                                            ? formatDistanceToNow(parseISO(a.applied_at), { addSuffix: true })
+                                            : ''}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </Card>
     );
 }

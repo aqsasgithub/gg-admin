@@ -18,6 +18,7 @@ import AssetsPage          from './pages/AssetsPage';
 import TakedownsPage       from './pages/TakedownsPage';
 import TakedownDetailPage  from './pages/TakedownDetailPage';
 import LicensingPage       from './pages/LicensingPage';
+import LicenseApplicationsPage from './pages/LicenseApplicationsPage';
 import ApiHealthPage       from './pages/ApiHealthPage';
 import AuditLogPage        from './pages/AuditLogPage';
 import ActivityPage        from './pages/ActivityPage';
@@ -132,6 +133,7 @@ export default function App() {
                     <Route path="/costs"              element={<CostsPage />} />
                     <Route path="/pricing"            element={<PricingPlansPage />} />
                     <Route path="/licensing"          element={<LicensingPage />} />
+                    <Route path="/license-applications" element={<LicenseApplicationsPage />} />
 
                     {/* Compliance & governance */}
                     <Route path="/audit"              element={<AuditLogPage />} />

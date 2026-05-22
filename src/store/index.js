@@ -53,6 +53,9 @@ import adminTicketControl   from '../features/admin/adminTicketControlSlice';
 import adminTakedownControl from '../features/admin/adminTakedownControlSlice';
 import adminScanControlOps  from '../features/admin/adminScanControlOpsSlice';
 
+// Pass B / Task 5 — customer license application review.
+import adminLicenseApplications from '../features/admin/adminLicenseApplicationsSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -100,6 +103,8 @@ export const store = configureStore({
         adminTicketControl,
         adminTakedownControl,
         adminScanControlOps,
+        // Pass B / Task 5
+        adminLicenseApplications,
     },
 });
 

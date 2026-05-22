@@ -80,7 +80,8 @@ const GROUPS = [
         items: [
             { to: '/costs',      label: 'Cost analytics', icon: DollarSign, cap: 'costs.read' },
             { to: '/pricing',    label: 'Pricing plans',  icon: Tag,        cap: 'pricing.read' },
-            { to: '/licensing',  label: 'Licensing',      icon: CreditCard, cap: 'licenses.read' },
+            { to: '/licensing',           label: 'Licensing',           icon: CreditCard, cap: 'licenses.read' },
+            { to: '/license-applications', label: 'License applications', icon: CreditCard, cap: 'licenses.read' },
         ],
     },
     {

@@ -33,9 +33,27 @@ export default function ImpersonateButton({ user, size = 'sm' }) {
         if (!reason.trim() || reason.trim().length < 5) return;
         setBusy(true);
         try {
-            await dispatch(startImpersonation({
+            const action = await dispatch(startImpersonation({
                 userId: user.id, reason: reason.trim(), durationMinutes: ttl,
             }));
+            // Pass F / Task 5 — auto-open the customer app in a new tab on
+            // success. Falls back to the manual Open/Copy buttons in the
+            // success state below when popup is blocked.
+            const payload = action?.payload || action;
+            const url = payload?.login_url
+                ?? payload?.customer_app_url
+                ?? payload?.data?.login_url
+                ?? payload?.data?.customer_app_url;
+            if (url) {
+                const popup = window.open(url, '_blank', 'noopener,noreferrer');
+                if (!popup || popup.closed) {
+                    // Popup blocked — the success state shows the URL with
+                    // a Copy button + Open anchor as a fallback.
+                    try { (await import('react-hot-toast')).default.error(
+                        'Pop-up blocked. Use the Open button or copy the URL.',
+                    ); } catch { /* toast may not be available in some test envs */ }
+                }
+            }
         } finally { setBusy(false); }
     };
 
@@ -112,14 +130,14 @@ export default function ImpersonateButton({ user, size = 'sm' }) {
                                             Customer app URL (one-tap to log in as {lastStarted.target_user?.email})
                                         </label>
                                         <div className="flex gap-1">
-                                            <input type="text" readOnly value={lastStarted.customer_app_url ?? ''}
+                                            <input type="text" readOnly value={(lastStarted.login_url ?? lastStarted.customer_app_url) ?? ''}
                                                 className="flex-1 font-mono text-xs p-2 border border-slate-300 rounded-md bg-slate-50" />
-                                            <button type="button" onClick={() => navigator.clipboard.writeText(lastStarted.customer_app_url ?? '')}
+                                            <button type="button" onClick={() => navigator.clipboard.writeText((lastStarted.login_url ?? lastStarted.customer_app_url) ?? '')}
                                                 className="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50" title="Copy URL">
                                                 <Copy size={14} />
                                             </button>
-                                            {lastStarted.customer_app_url && (
-                                                <a href={lastStarted.customer_app_url} target="_blank" rel="noopener noreferrer"
+                                            {(lastStarted.login_url ?? lastStarted.customer_app_url) && (
+                                                <a href={(lastStarted.login_url ?? lastStarted.customer_app_url)} target="_blank" rel="noopener noreferrer"
                                                     className="inline-flex items-center gap-1 px-2 py-1 bg-guardian-navy hover:bg-guardian-navy-800 text-white rounded text-sm">
                                                     <ExternalLink size={14} /> Open
                                                 </a>
