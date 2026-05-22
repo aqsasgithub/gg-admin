@@ -1,179 +1,175 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Link } from 'react-router-dom';
+import { Power, Loader2, Play, RotateCcw, Repeat, RefreshCw, XCircle, Archive } from 'lucide-react';
 import {
-    Power, AlertCircle, Clock, Loader2, XCircle, Building2,
-} from 'lucide-react';
-import { formatDistanceToNow, parseISO } from 'date-fns';
-import {
-    fetchStuckScans, markScanFailed,
-    selectStuckScans, selectScanControlLoading,
-} from '../features/admin/adminScanControlSlice';
+    fetchScanControl, runScan, scanControlAction,
+    selectScanControlList, selectScanControlMeta, selectScanControlLoading, selectScanControlActing,
+} from '../features/admin/adminScanControlOpsSlice';
+import { selectAdminCapabilities } from '../features/auth/authSlice';
+import AdminFilterBar from '../components/admin/AdminFilterBar';
 
-/**
- * Operational view for scan control:
- *   - "Stuck scans" — in_progress for >N hours, candidates for force-fail
- *   - Per-tenant scan control is managed on each Company detail page's
- *     Scans tab (CompanyScanControlPanel inside CompanyScansTab)
- */
 export default function ScanControlPage() {
     const dispatch = useDispatch();
-    const stuck    = useSelector(selectStuckScans);
-    const loading  = useSelector(selectScanControlLoading);
+    const list    = useSelector(selectScanControlList);
+    const meta    = useSelector(selectScanControlMeta);
+    const loading = useSelector(selectScanControlLoading);
+    const acting  = useSelector(selectScanControlActing);
+    const caps    = useSelector(selectAdminCapabilities);
+    const can = (c) => caps.includes('*') || caps.includes(c);
+    const canRun = can('scans.run');
+    const canArchive = can('scans.archive');
 
-    const [hours,    setHours]    = useState(2);
-    const [failing,  setFailing]  = useState(null);
+    const [filters, setFilters] = useState({});
+    const [showRun, setShowRun] = useState(false);
+    const [archiveFor, setArchiveFor] = useState(null);
 
-    useEffect(() => { dispatch(fetchStuckScans({ hours })); }, [dispatch, hours]);
+    const reload = () => dispatch(fetchScanControl(filters));
+    useEffect(() => { reload(); }, [dispatch, JSON.stringify(filters)]);
+
+    const act = async (scanId, action, body = {}) => { await dispatch(scanControlAction({ scanId, action, body })); reload(); };
 
     return (
         <div className="p-6 space-y-4">
-            <header>
-                <h1 className="text-2xl font-semibold text-guardian-navy flex items-center gap-2">
-                    <Power size={22} /> Scan control
-                </h1>
-                <p className="text-sm text-slate-600">
-                    Stuck scans + recovery actions. Per-tenant scan policy (freeze, block modules, quotas, concurrency limits)
-                    is managed on each Company's Scans tab.
-                </p>
+            <header className="flex items-start justify-between">
+                <div>
+                    <h1 className="text-2xl font-semibold text-guardian-navy flex items-center gap-2"><Power size={22} /> Scan Control</h1>
+                    <p className="text-sm text-slate-600 max-w-3xl">Trigger, retry, replay, reprocess, cancel and archive scans. Runs dispatch to the real scan pipeline; archive is routed to the approval queue.</p>
+                </div>
+                {canRun && <button onClick={() => setShowRun(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-guardian-navy text-white text-sm hover:bg-guardian-navy-800"><Play size={14} /> Run scan</button>}
             </header>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-sm text-amber-900 space-y-2">
-                <p>
-                    <strong>Worker state taxonomy.</strong> The DB <code>status</code> column reflects what the
-                    application <em>thinks</em> is happening, not necessarily what is. A row can be:
-                </p>
-                <ul className="ml-4 list-disc text-xs space-y-0.5">
-                    <li><code>queued</code>     — job dispatched but not yet picked up by a worker</li>
-                    <li><code>in_progress</code> — a worker claimed it; <em>may still be running, or may be zombie</em></li>
-                    <li><code>stale</code>     — <code>in_progress</code> for &gt; N hours (this list)</li>
-                    <li><code>failed</code>    — terminal; cleared from concurrency caps</li>
-                    <li><code>completed</code> — terminal; result persisted</li>
-                </ul>
-                <p>
-                    <strong>"Mark failed" only writes to the DB.</strong> It clears the row's concurrency lock so the tenant
-                    can dispatch new scans, and removes it from operational dashboards. It does <strong>not</strong> terminate
-                    a running worker process — the product's scanner pipeline has no mid-run cancellation primitive (yet).
-                    If a worker is still alive, it will keep running until it finishes naturally and may overwrite the row
-                    back to <code>completed</code>.
-                </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-                <label className="text-xs font-medium text-slate-700">In progress for at least</label>
-                <select value={hours} onChange={(e) => setHours(parseInt(e.target.value, 10))}
-                    className="px-2 py-1 text-sm border border-slate-300 rounded-md">
-                    <option value="1">1 hour</option>
-                    <option value="2">2 hours</option>
-                    <option value="4">4 hours</option>
-                    <option value="12">12 hours</option>
-                    <option value="24">24 hours</option>
-                </select>
-                <button type="button" onClick={() => dispatch(fetchStuckScans({ hours }))}
-                    className="px-3 py-1 text-sm bg-slate-100 hover:bg-slate-200 rounded-md">Refresh</button>
-            </div>
+            <AdminFilterBar
+                filters={[
+                    { key: 'company_id', type: 'text', label: 'Company', placeholder: 'cmp_…' },
+                    { key: 'status', type: 'text', label: 'Status', placeholder: 'queued / running…' },
+                    { key: 'scan_type', type: 'text', label: 'Scan type' },
+                ]}
+                value={filters} onChange={setFilters} onClear={() => setFilters({})}
+            />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                <table className="min-w-full text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                         <tr>
-                            <th className="px-3 py-2 text-left">Scan</th>
-                            <th className="px-3 py-2 text-left">Type</th>
-                            <th className="px-3 py-2 text-left">Company</th>
-                            <th className="px-3 py-2 text-left">Started</th>
-                            <th className="px-3 py-2 text-left">Age</th>
-                            <th className="px-3 py-2"></th>
+                            <th className="text-left px-3 py-2">Scan</th>
+                            <th className="text-left px-3 py-2">Type</th>
+                            <th className="text-left px-3 py-2">Status</th>
+                            <th className="text-right px-3 py-2">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {loading && !stuck.length ? (
-                            <tr><td colSpan="6" className="px-3 py-8 text-center text-slate-500">
-                                <Loader2 size={14} className="inline animate-spin mr-2" /> Loading…
-                            </td></tr>
-                        ) : !stuck.length ? (
-                            <tr><td colSpan="6" className="px-3 py-8 text-center text-slate-500">
-                                No stuck scans. The scanner pipeline is healthy.
-                            </td></tr>
-                        ) : stuck.map((s) => (
-                            <tr key={s.id} className="hover:bg-slate-50/50">
-                                <td className="px-3 py-2.5">
-                                    <Link to={`/scans/${s.id}`} className="font-mono text-xs text-guardian-navy hover:underline">
-                                        {s.id}
-                                    </Link>
-                                </td>
-                                <td className="px-3 py-2.5 text-xs">
-                                    {s.scan_type}{s.scan_sub_type && <span className="text-slate-500"> / {s.scan_sub_type}</span>}
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <Link to={`/companies/${s.company_id}`}
-                                        className="inline-flex items-center gap-1 text-xs font-mono text-slate-700 hover:underline">
-                                        <Building2 size={11} /> {s.company_id}
-                                    </Link>
-                                </td>
-                                <td className="px-3 py-2.5 text-xs text-slate-500">
-                                    {s.started_at ? formatDistanceToNow(parseISO(s.started_at), { addSuffix: true }) : '—'}
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700">
-                                        <Clock size={11} /> {s.age_hours}h
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2.5 text-right">
-                                    <button type="button" onClick={() => setFailing(s)}
-                                        title="Marks the DB row as failed. Does NOT kill a running worker."
-                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-700 rounded-md">
-                                        <XCircle size={11} /> Mark failed (DB)
-                                    </button>
+                        {loading && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={16} /> Loading…</td></tr>}
+                        {!loading && list.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400">No scans.</td></tr>}
+                        {!loading && list.map((s) => (
+                            <tr key={s.id} className="hover:bg-slate-50">
+                                <td className="px-3 py-2"><div className="font-medium text-slate-800">{s.id}</div><div className="text-xs text-slate-400">{s.company_id}</div></td>
+                                <td className="px-3 py-2 text-slate-600">{s.scan_type}</td>
+                                <td className="px-3 py-2 text-slate-600">{s.status}</td>
+                                <td className="px-3 py-2 text-right">
+                                    <div className="inline-flex gap-1 flex-wrap justify-end">
+                                        {canRun && <>
+                                            <ActBtn icon={XCircle} label="Cancel" onClick={() => act(s.id, 'cancel')} disabled={acting} />
+                                            <ActBtn icon={RotateCcw} label="Retry" onClick={() => act(s.id, 'retry')} disabled={acting} />
+                                            <ActBtn icon={Repeat} label="Replay" onClick={() => act(s.id, 'replay')} disabled={acting} />
+                                            <ActBtn icon={RefreshCw} label="Reprocess" onClick={() => act(s.id, 'reprocess')} disabled={acting} />
+                                        </>}
+                                        {canArchive && <ActBtn icon={Archive} label="Archive" red onClick={() => setArchiveFor(s.id)} disabled={acting} />}
+                                        {!canRun && !canArchive && <span className="text-xs text-slate-400">View only</span>}
+                                    </div>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            {meta && <div className="text-xs text-slate-500">{meta.total} scans</div>}
 
-            {failing && (
-                <ForceFailModal scan={failing} onClose={() => setFailing(null)}
-                    onConfirm={async (reason) => {
-                        await dispatch(markScanFailed({ scanId: failing.id, reason }));
-                        setFailing(null);
-                    }} />
+            {showRun && canRun && <RunScanModal onClose={() => setShowRun(false)} onRan={() => { setShowRun(false); reload(); }} />}
+            {archiveFor && canArchive && (
+                <ReasonModal title="Archive scan (needs approval)" onCancel={() => setArchiveFor(null)}
+                    onConfirm={async (reason) => { await act(archiveFor, 'archive', { reason }); setArchiveFor(null); }} />
             )}
         </div>
     );
 }
 
-function ForceFailModal({ scan, onClose, onConfirm }) {
-    const [reason, setReason] = useState('');
-    const [busy,   setBusy]   = useState(false);
-    const valid = reason.length >= 5;
+function ActBtn({ icon: Icon, label, onClick, disabled, red }) {
+    const cls = red ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
+    return <button onClick={onClick} disabled={disabled} title={label} className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${cls} disabled:opacity-50`}><Icon size={12} /> {label}</button>;
+}
+
+function RunScanModal({ onClose, onRan }) {
+    const dispatch = useDispatch();
+    const [form, setForm] = useState({
+        company_id: '', scan_type: '', domain_id: '', module: '',
+        api_provider: '', priority: 5, mode: 'active',
+    });
+    const [busy, setBusy] = useState(false);
+    const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+    const submit = async () => {
+        setBusy(true);
+        try {
+            await dispatch(runScan({
+                company_id:   form.company_id,
+                scan_type:    form.scan_type,
+                domain_id:    form.domain_id || undefined,
+                module:       form.module || undefined,
+                api_provider: form.api_provider || undefined,
+                priority:     Number(form.priority) || undefined,
+                mode:         form.mode || undefined,
+            }));
+            onRan();
+        } finally { setBusy(false); }
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="w-full max-w-md mx-4 bg-white rounded-lg shadow-xl">
-                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <h3 className="text-base font-semibold flex items-center gap-2"><AlertCircle size={16} className="text-red-600" /> Mark scan failed (DB only)</h3>
-                    <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+            <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold text-slate-900">Run scan</h3>
+                <label className="block text-sm">Company ID *<input value={form.company_id} onChange={set('company_id')} placeholder="cmp_…" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                <label className="block text-sm">Scan type *<input value={form.scan_type} onChange={set('scan_type')} placeholder="network_security / cloud_security…" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-sm">Domain ID<input value={form.domain_id} onChange={set('domain_id')} placeholder="dmn_… (module scans)" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                    <label className="block text-sm">Module<input value={form.module} onChange={set('module')} placeholder="defaults to scan type" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
                 </div>
-                <div className="p-5">
-                    <p className="text-sm text-slate-700 mb-2">
-                        Mark scan <code className="font-mono">{scan.id}</code> as <strong>failed</strong> in the database.
-                    </p>
-                    <p className="text-xs text-slate-500 mb-3">
-                        <strong>This does not kill a running worker.</strong> It clears the concurrency lock so the tenant
-                        can dispatch new scans. If a worker process is still alive, it will keep running and may overwrite
-                        this row back to <code>completed</code> when it finishes. Use this when a worker has died or a job
-                        is genuinely stale — not as a "stop this scan now" button.
-                    </p>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Reason (≥5 chars, audited)</label>
-                    <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
-                        className="w-full p-2 text-sm border border-slate-300 rounded-md" />
+                <label className="block text-sm">API provider<input value={form.api_provider} onChange={set('api_provider')} placeholder="aws / gcp / azure (provider scans)" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-sm">Priority
+                        <select value={form.priority} onChange={set('priority')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm">
+                            {[1,2,3,4,5,6,7,8,9,10].map((n) => <option key={n} value={n}>{n}{n === 1 ? ' (highest)' : n === 10 ? ' (lowest)' : ''}</option>)}
+                        </select>
+                    </label>
+                    <label className="block text-sm">Mode
+                        <select value={form.mode} onChange={set('mode')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm">
+                            <option value="active">Active</option>
+                            <option value="passive">Passive</option>
+                        </select>
+                    </label>
                 </div>
-                <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
-                    <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
-                    <button type="button" disabled={!valid || busy}
-                        onClick={async () => { setBusy(true); try { await onConfirm(reason); } finally { setBusy(false); } }}
-                        className="px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-md disabled:opacity-50">
-                        {busy ? 'Marking failed…' : 'Mark failed (DB)'}
-                    </button>
+                <p className="text-xs text-slate-400">Module scans need a Domain ID + Module. Provider scans need an API provider with a configured connection.</p>
+                <div className="flex justify-end gap-2">
+                    <button onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
+                    <button disabled={!form.company_id || !form.scan_type || busy} onClick={submit}
+                        className="px-3 py-1.5 text-sm text-white rounded bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50">Run</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ReasonModal({ title, onCancel, onConfirm }) {
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(false);
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+            <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold text-slate-900">{title}</h3>
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Reason (required)" className="w-full text-sm p-2 border border-slate-300 rounded-md" />
+                <div className="flex justify-end gap-2">
+                    <button onClick={onCancel} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
+                    <button disabled={!reason.trim() || busy} onClick={async () => { setBusy(true); try { await onConfirm(reason.trim()); } finally { setBusy(false); } }}
+                        className="px-3 py-1.5 text-sm text-white rounded bg-red-600 hover:bg-red-700 disabled:opacity-50">Confirm</button>
                 </div>
             </div>
         </div>

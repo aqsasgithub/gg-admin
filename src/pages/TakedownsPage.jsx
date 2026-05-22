@@ -1,238 +1,234 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Link } from 'react-router-dom';
-import { Sword, Clock, AlertTriangle, Loader2 } from 'lucide-react';
-import { formatDistanceToNow, parseISO } from 'date-fns';
+import { Sword, Loader2, Send, ArrowUpCircle, CheckCircle2, Lock, Plus } from 'lucide-react';
 import {
-    fetchTakedowns, fetchTakedownStats,
-    selectTakedowns, selectTakedownsMeta, selectTakedownsLoading, selectTakedownStats,
-} from '../features/admin/adminTakedownsSlice';
+    fetchTakedownControl, takedownCaseAction, createTakedownCase,
+    selectTakedownControl, selectTakedownControlMeta, selectTakedownControlLoading, selectTakedownControlActing,
+} from '../features/admin/adminTakedownControlSlice';
+import { selectAdminCapabilities } from '../features/auth/authSlice';
 import AdminFilterBar from '../components/admin/AdminFilterBar';
 
-/**
- * Cross-tenant takedown queue. Status, severity, and abuse_kind match
- * the real customer-side schema. The queue surfaces SLA-breached cases
- * via colour + a `breached` filter; severity drives sort order
- * alongside status precedence.
- */
-
-const STATUS_OPTIONS = [
-    { value: 'open',                label: 'Open' },
-    { value: 'evidence_collecting', label: 'Evidence collecting' },
-    { value: 'submitting',          label: 'Submitting' },
-    { value: 'in_progress',         label: 'In progress' },
-    { value: 'resolved',            label: 'Resolved' },
-    { value: 'expired',             label: 'Expired' },
-    { value: 'rejected',            label: 'Rejected' },
-    { value: 'closed',              label: 'Closed (admin)' },
-];
-
-const SEVERITY_OPTIONS = [
-    { value: 'critical', label: 'Critical' },
-    { value: 'high',     label: 'High' },
-    { value: 'medium',   label: 'Medium' },
-    { value: 'low',      label: 'Low' },
-];
-
-const ABUSE_OPTIONS = [
-    { value: 'phishing',             label: 'Phishing' },
-    { value: 'malware_distribution', label: 'Malware' },
-    { value: 'brand_impersonation',  label: 'Brand impersonation' },
-    { value: 'fraud',                label: 'Fraud' },
-    { value: 'fake_app',             label: 'Fake app' },
-    { value: 'pii_exposure',         label: 'PII exposure' },
-    { value: 'trademark_violation',  label: 'Trademark' },
-    { value: 'copyright_violation',  label: 'Copyright' },
-    { value: 'other',                label: 'Other' },
-];
-
-const STATUS_STYLES = {
-    open:                'bg-sky-100 text-sky-800 ring-sky-200',
-    evidence_collecting: 'bg-violet-100 text-violet-800 ring-violet-200',
-    submitting:          'bg-amber-100 text-amber-800 ring-amber-200',
-    in_progress:         'bg-blue-100 text-blue-800 ring-blue-200',
-    resolved:            'bg-emerald-100 text-emerald-800 ring-emerald-200',
-    expired:             'bg-orange-100 text-orange-800 ring-orange-200',
-    rejected:            'bg-red-100 text-red-800 ring-red-200',
-    closed:              'bg-slate-200 text-slate-700 ring-slate-300',
-};
-
-const SEVERITY_STYLES = {
-    critical: 'bg-red-100 text-red-800 ring-red-200',
-    high:     'bg-orange-100 text-orange-800 ring-orange-200',
-    medium:   'bg-amber-100 text-amber-800 ring-amber-200',
-    low:      'bg-emerald-100 text-emerald-800 ring-emerald-200',
-};
-
-export function TakedownStatusPill({ status }) {
-    const cls = STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-700 ring-slate-200';
-    return (
-        <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ring-1 capitalize ${cls}`}>
-            {String(status ?? 'unknown').replace(/_/g, ' ')}
-        </span>
-    );
-}
-
-export function SeverityPill({ severity }) {
-    const cls = SEVERITY_STYLES[severity] ?? 'bg-slate-100 text-slate-700 ring-slate-200';
-    return (
-        <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ring-1 capitalize ${cls}`}>
-            {severity ?? '—'}
-        </span>
-    );
-}
+const SEV = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
 
 export default function TakedownsPage() {
     const dispatch = useDispatch();
-    const list     = useSelector(selectTakedowns);
-    const meta     = useSelector(selectTakedownsMeta);
-    const loading  = useSelector(selectTakedownsLoading);
-    const stats    = useSelector(selectTakedownStats);
+    const list    = useSelector(selectTakedownControl);
+    const meta    = useSelector(selectTakedownControlMeta);
+    const loading = useSelector(selectTakedownControlLoading);
+    const acting  = useSelector(selectTakedownControlActing);
+    const caps    = useSelector(selectAdminCapabilities);
+    const can = (c) => caps.includes('*') || caps.includes(c);
+    const canWrite = can('takedowns.write');
 
-    const [filters, setFilters] = useState({ open_only: true });
-    const [page,    setPage]    = useState(1);
+    const [filters, setFilters] = useState({});
+    const [reasonFor, setReasonFor] = useState(null); // { id, action }
+    const [submitFor, setSubmitFor] = useState(null); // case id for the submit modal
+    const [showCreate, setShowCreate] = useState(false);
 
-    useEffect(() => {
-        dispatch(fetchTakedowns({ ...filters, page, per_page: 50 }));
-    }, [dispatch, filters, page]);
-    useEffect(() => { dispatch(fetchTakedownStats()); }, [dispatch]);
+    const reload = () => dispatch(fetchTakedownControl(filters));
+    useEffect(() => { reload(); }, [dispatch, JSON.stringify(filters)]);
+
+    const act = async (id, action, body = {}) => { await dispatch(takedownCaseAction({ id, action, body })); reload(); };
 
     return (
         <div className="p-6 space-y-4">
-            <header>
-                <h1 className="text-2xl font-semibold text-guardian-navy flex items-center gap-2">
-                    <Sword size={22} /> Takedowns
-                </h1>
-                <p className="text-sm text-slate-600">
-                    Cross-tenant takedown queue. Case status is driven by the customer-side state
-                    machine — admins can assign, change severity, add notes, and force-resolve / force-close.
-                </p>
+            <header className="flex items-start justify-between">
+                <div>
+                    <h1 className="text-2xl font-semibold text-guardian-navy flex items-center gap-2"><Sword size={22} /> Takedowns — Control</h1>
+                    <p className="text-sm text-slate-600 max-w-3xl">Open cases with target URLs, submit to providers, escalate, resolve and force-close. Submissions run through the real takedown pipeline; force-close is routed to the approval queue.</p>
+                </div>
+                {canWrite && (
+                    <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-guardian-navy text-white text-sm hover:bg-guardian-navy-800"><Plus size={14} /> New case</button>
+                )}
             </header>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <Stat label="Open total"          value={stats?.open_total ?? '—'} />
-                <Stat label="SLA breached"        value={stats?.sla_breached ?? '—'}
-                      tone={stats?.sla_breached > 0 ? 'critical' : 'default'} />
-                <Stat label="Resolved (window)"   value={stats?.resolved_in_window ?? '—'} />
-                <Stat label="Median TTR (hours)"  value={stats?.median_ttr_hours ?? '—'} />
-                <Stat label="Window (days)"       value={stats?.window_days ?? '—'} />
-            </div>
-
-            {/* Filters */}
             <AdminFilterBar
                 filters={[
-                    { key: 'search',       type: 'text',   label: 'Search', placeholder: 'Case ID, URL, brand…' },
-                    { key: 'status',       type: 'select', label: 'Status',     options: STATUS_OPTIONS },
-                    { key: 'severity',     type: 'select', label: 'Severity',   options: SEVERITY_OPTIONS },
-                    { key: 'abuse_kind',   type: 'select', label: 'Abuse kind', options: ABUSE_OPTIONS },
-                    { key: 'open_only',          type: 'boolean', label: 'Open only' },
-                    { key: 'sla_breached_only',  type: 'boolean', label: 'SLA breached only' },
+                    { key: 'status', type: 'text', label: 'Status', placeholder: 'open / submitted…' },
+                    { key: 'abuse_kind', type: 'text', label: 'Abuse kind' },
                 ]}
-                value={filters}
-                onChange={(v) => { setFilters(v); setPage(1); }}
-                onClear={() => { setFilters({ open_only: true }); setPage(1); }}
+                value={filters} onChange={setFilters} onClear={() => setFilters({})}
             />
 
-            {/* Table */}
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                <table className="min-w-full text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                         <tr>
-                            <th className="px-3 py-2 text-left">Case</th>
-                            <th className="px-3 py-2 text-left">Target</th>
-                            <th className="px-3 py-2 text-left">Company</th>
-                            <th className="px-3 py-2 text-left">Status</th>
-                            <th className="px-3 py-2 text-left">Severity</th>
-                            <th className="px-3 py-2 text-left">Abuse kind</th>
-                            <th className="px-3 py-2 text-left">SLA</th>
-                            <th className="px-3 py-2 text-left">Opened</th>
+                            <th className="text-left px-3 py-2">Case</th>
+                            <th className="text-left px-3 py-2">Brand</th>
+                            <th className="text-left px-3 py-2">Severity</th>
+                            <th className="text-left px-3 py-2">Status</th>
+                            <th className="text-right px-3 py-2">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {loading && !list.length ? (
-                            <tr><td colSpan="8" className="px-3 py-8 text-center text-slate-500">
-                                <Loader2 size={14} className="inline animate-spin mr-2" /> Loading…
-                            </td></tr>
-                        ) : !list.length ? (
-                            <tr><td colSpan="8" className="px-3 py-8 text-center text-slate-500">
-                                No takedown cases match this filter.
-                            </td></tr>
-                        ) : list.map((c) => (
-                            <tr key={c.id} className="hover:bg-slate-50/50">
-                                <td className="px-3 py-2.5">
-                                    <Link to={`/takedowns/${c.id}`}
-                                        className="font-mono text-xs text-guardian-navy hover:underline">
-                                        {c.id}
-                                    </Link>
-                                    {c.protected_brand && (
-                                        <div className="text-[10px] text-slate-500 truncate max-w-[12rem]">
-                                            brand: {c.protected_brand}
+                        {loading && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={16} /> Loading…</td></tr>}
+                        {!loading && list.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">No takedown cases.</td></tr>}
+                        {!loading && list.map((c) => (
+                            <tr key={c.id} className="hover:bg-slate-50">
+                                <td className="px-3 py-2"><div className="font-medium text-slate-800">{c.id}</div><div className="text-xs text-slate-400">{c.abuse_kind}</div></td>
+                                <td className="px-3 py-2 text-slate-600">{c.protected_brand || '—'}</td>
+                                <td className="px-3 py-2 text-slate-600">{SEV[c.severity] || c.severity || '—'}</td>
+                                <td className="px-3 py-2 text-slate-600">{c.status}</td>
+                                <td className="px-3 py-2 text-right">
+                                    {canWrite ? (
+                                        <div className="inline-flex gap-1">
+                                            <ActBtn icon={Send} label="Submit" onClick={() => setSubmitFor(c.id)} disabled={acting} />
+                                            <ActBtn icon={ArrowUpCircle} label="Escalate" amber onClick={() => setReasonFor({ id: c.id, action: 'escalate' })} disabled={acting} />
+                                            <ActBtn icon={CheckCircle2} label="Resolve" onClick={() => act(c.id, 'resolve')} disabled={acting} />
+                                            <ActBtn icon={Lock} label="Force-close" red onClick={() => setReasonFor({ id: c.id, action: 'force-close' })} disabled={acting} />
                                         </div>
-                                    )}
-                                </td>
-                                <td className="px-3 py-2.5 text-xs">
-                                    {c.primary_target
-                                        ? <code className="text-slate-700 truncate inline-block max-w-xs">{c.primary_target}</code>
-                                        : <span className="italic text-slate-400">no target</span>}
-                                    {c.target_count > 1 && (
-                                        <span className="ml-1 text-[10px] text-slate-500">+{c.target_count - 1} more</span>
-                                    )}
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <Link to={`/companies/${c.company_id}?tab=takedowns`}
-                                        className="text-xs font-mono text-slate-700 hover:underline">
-                                        {c.company_id}
-                                    </Link>
-                                </td>
-                                <td className="px-3 py-2.5"><TakedownStatusPill status={c.status} /></td>
-                                <td className="px-3 py-2.5"><SeverityPill severity={c.severity} /></td>
-                                <td className="px-3 py-2.5 text-xs text-slate-700 capitalize">
-                                    {c.abuse_kind?.replace(/_/g, ' ') ?? '—'}
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    {c.sla_due_at ? (
-                                        <span className={`inline-flex items-center gap-1 text-xs ${c.sla_breached ? 'text-red-700 font-semibold' : 'text-slate-600'}`}>
-                                            {c.sla_breached
-                                                ? <AlertTriangle size={11} />
-                                                : <Clock size={11} className="text-slate-400" />}
-                                            {c.sla_hours_remaining < 0
-                                                ? `${Math.abs(c.sla_hours_remaining)}h over`
-                                                : `${c.sla_hours_remaining}h left`}
-                                        </span>
-                                    ) : <span className="text-xs text-slate-400">—</span>}
-                                </td>
-                                <td className="px-3 py-2.5 text-xs text-slate-500">
-                                    {c.created_at ? formatDistanceToNow(parseISO(c.created_at), { addSuffix: true }) : '—'}
+                                    ) : <span className="text-xs text-slate-400">View only</span>}
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
-                {meta && meta.last_page > 1 && (
-                    <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-t border-slate-200 text-sm">
-                        <div className="text-slate-600">Page {meta.current_page} of {meta.last_page} · {meta.total} cases</div>
-                        <div className="flex gap-1">
-                            <button type="button" disabled={meta.current_page <= 1}
-                                onClick={() => setPage((p) => p - 1)}
-                                className="px-2 py-1 rounded hover:bg-slate-200 disabled:opacity-40">Previous</button>
-                            <button type="button" disabled={meta.current_page >= meta.last_page}
-                                onClick={() => setPage((p) => p + 1)}
-                                className="px-2 py-1 rounded hover:bg-slate-200 disabled:opacity-40">Next</button>
-                        </div>
-                    </div>
-                )}
+            </div>
+            {meta && <div className="text-xs text-slate-500">{meta.total} cases</div>}
+
+            {reasonFor && (
+                <ReasonModal
+                    title={reasonFor.action === 'force-close' ? 'Force-close case (needs approval)' : 'Escalate case'}
+                    onCancel={() => setReasonFor(null)}
+                    onConfirm={async (reason) => { await act(reasonFor.id, reasonFor.action, { reason }); setReasonFor(null); }}
+                />
+            )}
+
+            {submitFor && (
+                <SubmitModal
+                    onCancel={() => setSubmitFor(null)}
+                    onConfirm={async (body) => { await act(submitFor, 'submit', body); setSubmitFor(null); }}
+                />
+            )}
+
+            {showCreate && canWrite && (
+                <CreateCaseModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); reload(); }} />
+            )}
+        </div>
+    );
+}
+
+function SubmitModal({ onCancel, onConfirm }) {
+    const [providerId, setProviderId] = useState('');
+    const [templateId, setTemplateId] = useState('');
+    const [busy, setBusy] = useState(false);
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+            <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold text-slate-900">Submit takedown</h3>
+                <label className="block text-sm">Provider override (optional)
+                    <input value={providerId} onChange={(e) => setProviderId(e.target.value)} placeholder="leave blank to auto-route (godaddy, urlhaus, cloudflare…)" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" />
+                </label>
+                <label className="block text-sm">Complaint template (optional)
+                    <input value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="template id" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" />
+                </label>
+                <p className="text-xs text-slate-400">Blank provider → the router picks providers per target. Submissions build evidence + complaint and run the real pipeline.</p>
+                <div className="flex justify-end gap-2">
+                    <button onClick={onCancel} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
+                    <button disabled={busy} onClick={async () => { setBusy(true); try { await onConfirm({ provider_id: providerId || undefined, template_id: templateId || undefined }); } finally { setBusy(false); } }}
+                        className="px-3 py-1.5 text-sm text-white rounded bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50">Submit</button>
+                </div>
             </div>
         </div>
     );
 }
 
-function Stat({ label, value, tone = 'default' }) {
-    const tones = { critical: 'text-red-600', default: 'text-guardian-navy' };
+function CreateCaseModal({ onClose, onCreated }) {
+    const dispatch = useDispatch();
+    const [form, setForm] = useState({ company_id: '', protected_brand: '', abuse_kind: 'phishing', notice_kind: 'dmca', severity: 3, urls: '', evidence: '' });
+    const [busy, setBusy] = useState(false);
+    const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+    const submit = async () => {
+        setBusy(true);
+        try {
+            const urls = form.urls.split('\n').map((u) => u.trim()).filter(Boolean);
+            await dispatch(createTakedownCase({
+                company_id: form.company_id,
+                protected_brand: form.protected_brand || undefined,
+                abuse_kind: form.abuse_kind,
+                notice_kind: form.notice_kind,
+                severity: Number(form.severity) || undefined,
+                urls,
+                evidence_note: form.evidence || undefined,
+            }));
+            onCreated();
+        } finally { setBusy(false); }
+    };
     return (
-        <div className="p-3 bg-white border border-slate-200 rounded-lg">
-            <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-            <div className={`mt-0.5 text-xl font-semibold ${tones[tone]}`}>{value}</div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+            <div className="w-full max-w-lg bg-white rounded-lg shadow-xl p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold text-slate-900">New takedown case</h3>
+                <label className="block text-sm">Company ID *<input value={form.company_id} onChange={set('company_id')} placeholder="cmp_…" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                <label className="block text-sm">Protected brand<input value={form.protected_brand} onChange={set('protected_brand')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" /></label>
+                <div className="grid grid-cols-3 gap-2">
+                    <label className="block text-sm">Abuse kind
+                        <select value={form.abuse_kind} onChange={set('abuse_kind')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm">
+                            {['phishing','malware','spoofing','counterfeit','impersonation'].map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                    </label>
+                    <label className="block text-sm">Notice kind
+                        <select value={form.notice_kind} onChange={set('notice_kind')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm">
+                            {['dmca','abuse','trademark','phishing_report'].map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                    </label>
+                    <label className="block text-sm">Severity
+                        <select value={form.severity} onChange={set('severity')} className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm">
+                            {[1,2,3,4].map((n) => <option key={n} value={n}>{['Low','Medium','High','Critical'][n-1]}</option>)}
+                        </select>
+                    </label>
+                </div>
+                <label className="block text-sm">Target URLs (one per line) *
+                    <textarea value={form.urls} onChange={set('urls')} rows={4} placeholder="https://phish.example.com/login&#10;https://evil.example.net" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm font-mono" />
+                </label>
+                <label className="block text-sm">Evidence note (optional)
+                    <textarea value={form.evidence} onChange={set('evidence')} rows={2} placeholder="context for the abuse report" className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded text-sm" />
+                </label>
+                <p className="text-xs text-slate-400">URLs become takedown targets via the orchestrator (evidence collection + provider routing). A case without URLs cannot be submitted.</p>
+                <div className="flex justify-end gap-2">
+                    <button onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
+                    <button disabled={!form.company_id || !form.urls.trim() || busy} onClick={submit}
+                        className="px-3 py-1.5 text-sm text-white rounded bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50">Create case</button>
+                </div>
+            </div>
         </div>
     );
+}
+
+function ActBtn({ icon: Icon, label, onClick, disabled, amber, red }) {
+    const cls = red ? 'bg-red-100 text-red-700 hover:bg-red-200' : amber ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
+    return <button onClick={onClick} disabled={disabled} title={label} className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${cls} disabled:opacity-50`}><Icon size={12} /> {label}</button>;
+}
+
+function ReasonModal({ title, onCancel, onConfirm }) {
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(false);
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+            <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold text-slate-900">{title}</h3>
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Reason (required)" className="w-full text-sm p-2 border border-slate-300 rounded-md" />
+                <div className="flex justify-end gap-2">
+                    <button onClick={onCancel} className="px-3 py-1.5 text-sm text-slate-700">Cancel</button>
+                    <button disabled={!reason.trim() || busy} onClick={async () => { setBusy(true); try { await onConfirm(reason.trim()); } finally { setBusy(false); } }}
+                        className="px-3 py-1.5 text-sm text-white rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-50">Confirm</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Re-exported pills used by CompanyTakedownsTab + TakedownDetailPage.
+export function TakedownStatusPill({ status }) {
+    const map = {
+        open: 'bg-blue-100 text-blue-800', submitted: 'bg-indigo-100 text-indigo-800',
+        escalated: 'bg-amber-100 text-amber-800', resolved: 'bg-emerald-100 text-emerald-800',
+        closed: 'bg-slate-200 text-slate-700',
+    };
+    return <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{status || '—'}</span>;
+}
+
+export function SeverityPill({ severity }) {
+    const map = { 1: 'bg-slate-100 text-slate-700', 2: 'bg-amber-100 text-amber-800', 3: 'bg-orange-100 text-orange-800', 4: 'bg-red-100 text-red-800' };
+    return <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${map[severity] || 'bg-slate-100 text-slate-700'}`}>{SEV[severity] || severity || '—'}</span>;
 }

@@ -47,6 +47,12 @@ import adminApiControl    from '../features/admin/adminApiControlSlice';
 import adminScoring       from '../features/admin/adminScoringSlice';
 import adminApprovals     from '../features/admin/adminApprovalsSlice';
 
+// Control surfaces (issue #4): tickets / takedowns / scans now act through
+// the control-plane endpoints rather than read-only observation endpoints.
+import adminTicketControl   from '../features/admin/adminTicketControlSlice';
+import adminTakedownControl from '../features/admin/adminTakedownControlSlice';
+import adminScanControlOps  from '../features/admin/adminScanControlOpsSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -90,6 +96,10 @@ export const store = configureStore({
         adminApiControl,
         adminScoring,
         adminApprovals,
+        // Control surfaces (issue #4)
+        adminTicketControl,
+        adminTakedownControl,
+        adminScanControlOps,
     },
 });
 
