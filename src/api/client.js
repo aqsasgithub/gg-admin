@@ -1,6 +1,7 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { API_BASE_URL, ADMIN_TOKEN_STORAGE_KEY } from '../configs/environments';
+import { readAdminContextHeaders } from '../features/admin/adminContextSlice';
 
 /**
  * Axios instance used by every admin slice. Pulls the API origin from
@@ -41,6 +42,17 @@ apiRequest.interceptors.request.use((config) => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Auto-inject the admin's picked (company, domain) context as headers
+    // on /admin/modules/* calls. The server's `admin.context` middleware
+    // folds these into the request input as company_id / domain_id so
+    // module-CRUD controllers don't have to thread IDs through every
+    // payload. See features/admin/adminContextSlice.js.
+    const url = config.url || '';
+    if (url.startsWith('/admin/modules/') || url.startsWith('admin/modules/')) {
+        Object.assign(config.headers, readAdminContextHeaders());
+    }
+
     return config;
 });
 

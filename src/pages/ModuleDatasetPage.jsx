@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useParams, Link } from 'react-router-dom';
 import {
-    ArrowLeft, Plus, Edit, Trash2, X, Save, Loader2, UserCheck, Server,
+    ArrowLeft, Plus, Edit, Trash2, X, Save, Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import {
@@ -11,6 +11,10 @@ import {
     selectDataset,
 } from '../features/admin/adminModuleDataSlice';
 import AdminConfirmModal from '../components/admin/AdminConfirmModal';
+import AdminContextBar from '../components/admin/AdminContextBar';
+import {
+    selectAdminContextCompanyId, selectAdminContextDomainId,
+} from '../features/admin/adminContextSlice';
 
 /**
  * /modules/:module/:dataset
@@ -37,9 +41,14 @@ export default function ModuleDatasetPage() {
     const { module, dataset } = useParams();
     const dispatch  = useDispatch();
     const bucket    = useSelector((s) => selectDataset(s, module, dataset));
+    // The picked context is auto-injected as request headers by the
+    // axios interceptor — we read it here only to re-fetch the list
+    // when the user switches company or domain.
+    const ctxCompanyId = useSelector(selectAdminContextCompanyId);
+    const ctxDomainId  = useSelector(selectAdminContextDomainId);
 
     const [filters,  setFilters]  = useState({
-        company_id: '', domain: '', admin_modified: '', page: 1, per_page: 50,
+        domain: '', page: 1, per_page: 50,
     });
     const [editing,  setEditing]  = useState(null);   // null | { id?, ...attrs }  (open form)
     const [deleting, setDeleting] = useState(null);   // null | record
@@ -47,7 +56,9 @@ export default function ModuleDatasetPage() {
     useEffect(() => {
         const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v != null));
         dispatch(fetchDatasetRecords({ module, dataset, params }));
-    }, [dispatch, module, dataset, filters]);
+        // Picker changes feed into headers (not params) — but we still
+        // need to re-fetch when they flip, so list them in deps.
+    }, [dispatch, module, dataset, filters, ctxCompanyId, ctxDomainId]);
 
     const meta          = bucket?.meta;
     // Shape detection — see file header. `list_fields` wins when both
@@ -85,6 +96,7 @@ export default function ModuleDatasetPage() {
 
     return (
         <div className="p-6 space-y-4">
+            <AdminContextBar />
             <div>
                 <Link to={`/modules/${module}`} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900">
                     <ArrowLeft size={12} /> Back to {moduleLabel}
@@ -102,29 +114,22 @@ export default function ModuleDatasetPage() {
                             <code className="text-xs px-1 py-0.5 bg-slate-100 rounded">{module}/{dataset}</code>
                         </p>
                     </div>
-                    <button type="button" onClick={() => setEditing({ /* blank = create */ })}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-guardian-navy hover:bg-guardian-navy-800 text-white text-sm font-medium rounded-md">
+                    <button type="button"
+                        onClick={() => setEditing({ /* blank = create */ })}
+                        disabled={!ctxCompanyId}
+                        title={!ctxCompanyId ? 'Pick a company in the context bar first.' : ''}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-guardian-navy hover:bg-guardian-navy-800 text-white text-sm font-medium rounded-md disabled:opacity-50">
                         <Plus size={14} /> Add record
                     </button>
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="bg-white border border-slate-200 rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-                <FilterField label="Company ID" value={filters.company_id}
-                    onChange={(v) => setFilter('company_id', v)} placeholder="cmp_..." />
+            {/* Filters — company/domain come from the context bar above. */}
+            <div className="bg-white border border-slate-200 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
                 <FilterField label="Domain contains" value={filters.domain}
                     onChange={(v) => setFilter('domain', v)} placeholder="example.com" />
-                <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Provenance</label>
-                    <select value={filters.admin_modified} onChange={(e) => setFilter('admin_modified', e.target.value)}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md">
-                        <option value="">All records</option>
-                        <option value="true">Admin-edited only</option>
-                    </select>
-                </div>
                 <button type="button"
-                    onClick={() => setFilters({ company_id: '', domain: '', admin_modified: '', page: 1, per_page: 50 })}
+                    onClick={() => setFilters({ domain: '', page: 1, per_page: 50 })}
                     className="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50">
                     Clear filters
                 </button>
@@ -149,18 +154,17 @@ export default function ModuleDatasetPage() {
                                     ))}
                                 </>
                             )}
-                            <th className="px-3 py-2 text-left">Source</th>
                             <th className="px-3 py-2 text-left">Updated</th>
                             <th className="px-3 py-2"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {bucket?.loading && !bucket?.list?.length ? (
-                            <tr><td colSpan={4 + (tabularMode ? listFields.length : 2 + extraFields.length)} className="px-3 py-8 text-center text-slate-500">
+                            <tr><td colSpan={3 + (tabularMode ? listFields.length : 2 + extraFields.length)} className="px-3 py-8 text-center text-slate-500">
                                 <Loader2 size={14} className="inline animate-spin mr-2" /> Loading records…
                             </td></tr>
                         ) : !bucket?.list?.length ? (
-                            <tr><td colSpan={4 + (tabularMode ? listFields.length : 2 + extraFields.length)} className="px-3 py-8 text-center text-slate-500">
+                            <tr><td colSpan={3 + (tabularMode ? listFields.length : 2 + extraFields.length)} className="px-3 py-8 text-center text-slate-500">
                                 No records match these filters. Click <strong>Add record</strong> to create one.
                             </td></tr>
                         ) : bucket.list.map((row) => (
@@ -218,7 +222,7 @@ export default function ModuleDatasetPage() {
             <AdminConfirmModal
                 open={deleting !== null}
                 title={`Delete record ${deleting?.id ?? ''}?`}
-                description="The row will be removed from the database. This action is recorded in the audit log."
+                description="The row will be removed from the database."
                 confirmLabel="Delete"
                 variant="destructive"
                 onCancel={() => setDeleting(null)}
@@ -231,9 +235,9 @@ export default function ModuleDatasetPage() {
 // ── Row ───────────────────────────────────────────────────────────────
 
 function Row({ row, columns, tabularMode, onEdit, onDelete }) {
-    const updated = row.admin_modified_at || row.updated_at;
+    const updated = row.updated_at;
     return (
-        <tr className={row.is_admin_modified ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-slate-50/50'}>
+        <tr className="hover:bg-slate-50/50">
             <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600">{row.id}</td>
             {tabularMode ? (
                 columns.map((c) => (
@@ -248,19 +252,6 @@ function Row({ row, columns, tabularMode, onEdit, onDelete }) {
                     ))}
                 </>
             )}
-            <td className="px-3 py-2.5">
-                {row.is_admin_modified ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-900 rounded border border-amber-200">
-                        <UserCheck size={9} /> admin
-                    </span>
-                ) : row.source ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-800 rounded border border-emerald-200">
-                        <Server size={9} /> Azure
-                    </span>
-                ) : (
-                    <span className="text-[10px] text-slate-500">unknown</span>
-                )}
-            </td>
             <td className="px-3 py-2.5 text-xs text-slate-500" title={updated}>
                 {updated ? formatDistanceToNow(parseISO(updated), { addSuffix: true }) : '—'}
             </td>
@@ -320,9 +311,10 @@ function PayloadRecordFormModal({ record, payloadColumn, extraFields, datasetLab
 
     return (
         <FormShell isCreate={isCreate} datasetLabel={datasetLabel} onClose={onClose} onSubmit={submit} busy={busy} error={error}>
-            <Field label="Domain ID *"  value={form.domain_id}  onChange={(v) => setField('domain_id', v)}  placeholder="dom_..." mono />
-            <Field label="Company ID *" value={form.company_id} onChange={(v) => setField('company_id', v)} placeholder="cmp_..." mono />
-            <Field label="Domain *"     value={form.domain}     onChange={(v) => setField('domain', v)}     placeholder="example.com" />
+            <p className="text-[11px] text-slate-500 -mt-1 mb-1">
+                Company and domain are taken from the picker above — no need to enter IDs.
+            </p>
+            <Field label="Domain *" value={form.domain} onChange={(v) => setField('domain', v)} placeholder="example.com" />
 
             {extraFields.map((f) => (
                 <Field key={f} label={humanizeField(f)} value={form[f] ?? ''} onChange={(v) => setField(f, v)} />
@@ -414,9 +406,11 @@ function TabularRecordFormModal({ record, listFields, fullFields, datasetLabel, 
                 columns get a single-line input. Leaving a field blank stores it as <code>null</code>.
             </p>
 
-            {/* Scalar (list) fields first */}
+            {/* Scalar (list) fields first. company_id / domain_id are
+                hidden — they come from the context picker. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {listFields.map((f) => {
+                    if (f === 'domain_id' || f === 'company_id') return null;
                     const previous = record?.[f];
                     if (looksJsonish(f, previous)) return null;
                     return (
@@ -554,10 +548,11 @@ function formatValue(v) {
 }
 
 function stripIdentity(record) {
-    // The backend ignores id/source/admin_modified_* on input — stripping
-    // them at the edge keeps the request body lean and the audit-log
-    // before/after diff clean.
-    const { id, source, is_admin_modified, admin_modified_at, admin_modified_by_user_id,
-            created_at, updated_at, ...rest } = record;
+    // Drop fields the backend ignores or supplies itself. Empty
+    // domain_id / company_id are dropped too so the admin.context
+    // middleware can fill them from the X-Admin-*-Id headers.
+    const { id, source, created_at, updated_at, ...rest } = record;
+    if (rest.domain_id  === '' || rest.domain_id  == null) delete rest.domain_id;
+    if (rest.company_id === '' || rest.company_id == null) delete rest.company_id;
     return rest;
 }

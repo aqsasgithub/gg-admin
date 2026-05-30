@@ -63,6 +63,7 @@ import FindingsControlPage       from './pages/FindingsControlPage';
 import ApiControlCentrePage      from './pages/ApiControlCentrePage';
 import ScoringControlPage        from './pages/ScoringControlPage';
 import ApprovalsPage             from './pages/ApprovalsPage';
+import GuardianGazeDashboard     from './pages/GuardianGazeDashboard';
 
 /**
  * Top-level routing. Routes are categorised in the Sidebar; this file
@@ -148,6 +149,7 @@ export default function App() {
                     <Route path="/api-control"   element={<ApiControlCentrePage />} />
                     <Route path="/scoring"       element={<ScoringControlPage />} />
                     <Route path="/approvals"     element={<ApprovalsPage />} />
+                    <Route path="/test"     element={<GuardianGazeDashboard />} />
                 </Route>
             </Route>
 

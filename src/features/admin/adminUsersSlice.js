@@ -54,6 +54,26 @@ export const inviteUser = createAsyncThunk(
     },
 );
 
+/**
+ * Admin-creates a user directly (email + name only). Maps to
+ * POST /admin/users → AdminUserController::store. The returned user has
+ * no usable password and is intended to be wired to a company immediately
+ * via POST /admin/companies (with user_id=...).
+ */
+export const createUser = createAsyncThunk(
+    'adminUsers/createUser',
+    async (payload, { rejectWithValue }) => {
+        try {
+            const res = await apiRequest.post('/admin/users', payload, API_CONFIG);
+            toast.success(`Created ${payload.email}`);
+            return res.data?.data;
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue(errorOf(e));
+        }
+    },
+);
+
 export const suspendUser = createAsyncThunk(
     'adminUsers/suspendUser',
     async ({ userId, reason }, { rejectWithValue }) => {

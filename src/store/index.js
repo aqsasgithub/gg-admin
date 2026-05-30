@@ -56,6 +56,14 @@ import adminScanControlOps  from '../features/admin/adminScanControlOpsSlice';
 // Pass B / Task 5 — customer license application review.
 import adminLicenseApplications from '../features/admin/adminLicenseApplicationsSlice';
 
+// Admin Assessment runner — thin wrapper around the same
+// ModuleOrchestratorService the customer Assessment page uses.
+import adminAssessment    from '../features/admin/adminAssessmentSlice';
+
+// Admin (company, domain) picker context — auto-injected as
+// X-Admin-Company-Id / X-Admin-Domain-Id headers on /admin/modules/* calls.
+import adminContext       from '../features/admin/adminContextSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -105,6 +113,10 @@ export const store = configureStore({
         adminScanControlOps,
         // Pass B / Task 5
         adminLicenseApplications,
+        // Admin Assessment runner
+        adminAssessment,
+        // Module CRUD picker context
+        adminContext,
     },
 });
 

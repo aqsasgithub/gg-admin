@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { UserPlus, Pause, Play, Key, ShieldPlus, MoreHorizontal, Mail, Trash2 } from 'lucide-react';
+import { UserPlus, Pause, Play, Key, ShieldPlus, MoreHorizontal, Mail, Trash2, Building2, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import {
-    fetchAdminUsers, inviteUser, suspendUser, reinstateUser, resetUserPassword,
+    fetchAdminUsers, inviteUser, createUser, suspendUser, reinstateUser, resetUserPassword,
     grantAdminRole, revokeAdminRole,
     selectAdminUsers, selectAdminUsersMeta, selectAdminUsersLoading, selectAdminUserWorking,
 } from '../features/admin/adminUsersSlice';
+import { createAdminCompany } from '../features/admin/adminCompaniesSlice';
 import RoleBadge from '../components/admin/RoleBadge';
 import AdminFilterBar from '../components/admin/AdminFilterBar';
 import AdminConfirmModal from '../components/admin/AdminConfirmModal';
 // Patch-7: lets a capable admin start a "view as customer" session.
 // The button hides itself for admins without `impersonation.act`.
 import ImpersonateButton from '../components/admin/ImpersonateButton';
+import { COUNTRIES } from '../utils/countries';
 
 /**
  * Cross-tenant user management page. Owner / support roles can invite,
@@ -42,6 +44,8 @@ export default function AdminUsers() {
     const [filters,  setFilters]   = useState({});
     const [page,     setPage]      = useState(1);
     const [showInvite, setShowInvite] = useState(false);
+    const [showCreate, setShowCreate] = useState(false);
+    const [createCompanyFor, setCreateCompanyFor] = useState(null); // user object
     const [confirm,  setConfirm]   = useState(null);    // {type, user}
     const [roleMenu, setRoleMenu]  = useState(null);    // user id whose dropdown is open
 
@@ -78,13 +82,22 @@ export default function AdminUsers() {
                     <h1 className="text-2xl font-semibold text-guardian-navy">Users</h1>
                     <p className="text-sm text-slate-600">Cross-tenant user administration.</p>
                 </div>
-                <button
-                    type="button"
-                    onClick={() => setShowInvite(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-guardian-navy hover:bg-guardian-navy-800 text-white text-sm font-medium rounded-md"
-                >
-                    <UserPlus size={14} /> Invite User
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setShowCreate(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-guardian-navy hover:bg-guardian-navy-800 text-white text-sm font-medium rounded-md"
+                    >
+                        <UserPlus size={14} /> Create User
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setShowInvite(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-md"
+                    >
+                        <Mail size={14} /> Invite User
+                    </button>
+                </div>
             </header>
 
             <AdminFilterBar
@@ -126,6 +139,7 @@ export default function AdminUsers() {
                                     refresh();
                                 }}
                                 onAction={(type, role) => setConfirm({ type, user: u, role })}
+                                onCreateCompany={() => setCreateCompanyFor(u)}
                             />
                         ))}
                     </tbody>
@@ -136,6 +150,18 @@ export default function AdminUsers() {
                 )}
             </div>
 
+            <CreateUserModal
+                open={showCreate}
+                onClose={() => setShowCreate(false)}
+                onSubmit={async (payload) => {
+                    const res = await dispatch(createUser(payload));
+                    if (createUser.fulfilled.match(res)) {
+                        setShowCreate(false);
+                        refresh();
+                    }
+                }}
+            />
+
             <InviteModal
                 open={showInvite}
                 onClose={() => setShowInvite(false)}
@@ -143,6 +169,18 @@ export default function AdminUsers() {
                     await dispatch(inviteUser(payload));
                     setShowInvite(false);
                     refresh();
+                }}
+            />
+
+            <CreateCompanyForUserModal
+                user={createCompanyFor}
+                onClose={() => setCreateCompanyFor(null)}
+                onSubmit={async (payload) => {
+                    const res = await dispatch(createAdminCompany(payload));
+                    if (createAdminCompany.fulfilled.match(res)) {
+                        setCreateCompanyFor(null);
+                        refresh();
+                    }
                 }}
             />
 
@@ -186,9 +224,12 @@ export default function AdminUsers() {
 
 // ── Row -------------------------------------------------------------------
 
-function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu }) {
+function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu, onCreateCompany }) {
     const working = useSelector((s) => selectAdminUserWorking(s, user.id));
     const isSuspended = user.status === 'suspended';
+    // One-company-per-user is enforced by the backend; reflect it in the UI
+    // by hiding the "Create company" button if the user already owns one.
+    const hasCompany = !!user.company_id;
 
     return (
         <tr className={isSuspended ? 'bg-red-50/30' : ''}>
@@ -228,6 +269,14 @@ function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu }
                         The component renders null if the current admin lacks
                         the impersonation.act capability. */}
                     <ImpersonateButton user={user} />
+                    {!hasCompany && (
+                        <IconAction
+                            icon={Building2}
+                            title="Create company for this user"
+                            color="text-guardian-navy"
+                            onClick={onCreateCompany}
+                        />
+                    )}
                     <IconAction
                         icon={Key}
                         title="Reset password"
@@ -432,6 +481,278 @@ function Field({ label, children }) {
         <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">{label}</label>
             {children}
+        </div>
+    );
+}
+
+// ── Create User modal ────────────────────────────────────────────────────
+//
+// Admin-creates a user directly with just email + name. Maps to
+// POST /admin/users → AdminUserController::store. Distinct from "Invite
+// User" (which sends an email-driven self-onboarding link).
+
+// Generate a strong random password using the Web Crypto API. 16 chars,
+// guaranteed to contain at least one uppercase, lowercase, digit and
+// symbol (satisfies the backend's Password::min(12)->mixedCase()->
+// letters()->numbers()->symbols() rule). The character pools avoid
+// look-alikes (0/O, 1/l/I) so a copy/paste from the visible field is
+// less error-prone.
+function generateStrongPassword(length = 16) {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghijkmnopqrstuvwxyz';
+    const digit = '23456789';
+    const symbol = '!@#$%^&*()-_=+[]{};:,.?';
+    const all = upper + lower + digit + symbol;
+    const rand = (max) => {
+        const u32 = new Uint32Array(1);
+        crypto.getRandomValues(u32);
+        return u32[0] % max;
+    };
+    // Seed one of each class so the strength rule cannot fail.
+    const pick = [upper, lower, digit, symbol].map((s) => s[rand(s.length)]);
+    for (let i = pick.length; i < length; i++) pick.push(all[rand(all.length)]);
+    // Fisher-Yates so the seeded chars aren't always at the front.
+    for (let i = pick.length - 1; i > 0; i--) {
+        const j = rand(i + 1);
+        [pick[i], pick[j]] = [pick[j], pick[i]];
+    }
+    return pick.join('');
+}
+
+function CreateUserModal({ open, onClose, onSubmit }) {
+    const [email, setEmail] = useState('');
+    const [name,  setName]  = useState('');
+    const [password, setPassword] = useState('');
+    // Eye toggle defaults to VISIBLE so the admin can read the generated
+    // password before sharing it with the user.
+    const [showPassword, setShowPassword] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+
+    if (!open) return null;
+
+    const generate = () => setPassword(generateStrongPassword(16));
+
+    const passwordValid = password.length >= 12;
+
+    const send = async () => {
+        setSubmitting(true);
+        try {
+            await onSubmit({ email, name, password });
+            setEmail(''); setName(''); setPassword('');
+            setShowPassword(true);
+        } finally { setSubmitting(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="w-full max-w-md mx-4 bg-white rounded-lg shadow-xl">
+                <div className="p-5 border-b border-slate-100">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+                        <UserPlus size={16} className="text-guardian-navy" /> Create User
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Creates an active user. Set or generate a password the user can sign in with
+                        right away. Wire a company to them from this list afterwards.
+                    </p>
+                </div>
+
+                <div className="p-5 space-y-3">
+                    <Field label="Name *">
+                        <input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            type="text"
+                            placeholder="Jane Doe"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                        />
+                    </Field>
+                    <Field label="Email *">
+                        <input
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            type="email"
+                            placeholder="jane@example.com"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                        />
+                    </Field>
+                    <Field label="Password *">
+                        <div className="relative">
+                            <input
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                type={showPassword ? 'text' : 'password'}
+                                placeholder="Click Generate or type a strong password"
+                                autoComplete="new-password"
+                                className="w-full px-3 py-2 pr-9 text-sm font-mono border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword((v) => !v)}
+                                title={showPassword ? 'Hide password' : 'Show password'}
+                                className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-700"
+                            >
+                                {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                        </div>
+                        <div className="mt-1.5 flex items-center justify-between">
+                            <button
+                                type="button"
+                                onClick={generate}
+                                className="inline-flex items-center gap-1 text-xs text-guardian-navy hover:underline"
+                            >
+                                <RefreshCw size={11} /> Generate strong password
+                            </button>
+                            <span className={`text-[11px] ${password.length === 0 ? 'text-slate-400' : passwordValid ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {password.length === 0
+                                    ? 'min 12 chars · mixed case · digits · symbols'
+                                    : passwordValid
+                                        ? `${password.length} chars`
+                                        : `${password.length} / 12 chars`}
+                            </span>
+                        </div>
+                    </Field>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 rounded-b-lg">
+                    <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700 hover:text-slate-900">
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={send}
+                        disabled={!email || !name || !passwordValid || submitting}
+                        className="px-3 py-1.5 text-sm font-medium bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50 text-white rounded-md"
+                    >
+                        {submitting ? 'Creating…' : 'Create user'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Create Company for a specific user modal ─────────────────────────────
+//
+// Fields mirror the customer-side AddCompany.jsx (client/src/pages/
+// protected/company/AddCompany.jsx) exactly: name, domain (primary),
+// industry, size (capacity), email, description, country, location.
+// One-company-per-user is enforced server-side; the icon that opens this
+// modal is hidden on the row when user.company_id is already set.
+
+const INDUSTRY_OPTIONS = [
+    'Technology', 'Finance', 'Healthcare', 'Manufacturing',
+    'Retail', 'Education', 'Government', 'Other',
+];
+const SIZE_OPTIONS = ['1-50', '51-200', '201-500', '500+'];
+
+function CreateCompanyForUserModal({ user, onClose, onSubmit }) {
+    const [form, setForm] = useState({
+        name: '', domain: '', industry: '', size: '',
+        email: '', description: '', country: '', location: '',
+    });
+    const [busy, setBusy] = useState(false);
+
+    if (!user) return null;
+
+    const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+    const send = async () => {
+        setBusy(true);
+        try {
+            await onSubmit({
+                user_id:     user.id,
+                name:        form.name,
+                domain:      form.domain,
+                industry:    form.industry    || undefined,
+                size:        form.size        || undefined,
+                email:       form.email       || undefined,
+                description: form.description || undefined,
+                country:     form.country,
+                location:    form.location    || undefined,
+                // Customer-side AddCompany.jsx fills `tags` with `size`.
+                tags:        form.size        || undefined,
+            });
+        } finally { setBusy(false); }
+    };
+
+    const valid = form.name && form.domain && form.country;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm overflow-y-auto py-8">
+            <div className="w-full max-w-2xl mx-4 bg-white rounded-lg shadow-xl">
+                <div className="p-5 border-b border-slate-100">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+                        <Building2 size={16} className="text-guardian-navy" /> Create Company
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Owner: <span className="font-medium text-slate-700">{user.name || user.email}</span>
+                        <span className="ml-1 font-mono text-[10px] text-slate-400">{user.id}</span>
+                    </p>
+                </div>
+
+                <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Field label="Organization Name *">
+                        <input value={form.name} onChange={(e) => set('name', e.target.value)}
+                            placeholder="e.g., Acme Corporation" className="form-input" />
+                    </Field>
+                    <Field label="Primary domain *">
+                        <input value={form.domain} onChange={(e) => set('domain', e.target.value)}
+                            placeholder="company.com" className="form-input" />
+                    </Field>
+                    <Field label="Industry">
+                        <select value={form.industry} onChange={(e) => set('industry', e.target.value)} className="form-input">
+                            <option value="">Select Industry</option>
+                            {INDUSTRY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                    </Field>
+                    <Field label="Company Size">
+                        <select value={form.size} onChange={(e) => set('size', e.target.value)} className="form-input">
+                            <option value="">Select Size</option>
+                            {SIZE_OPTIONS.map((o) => <option key={o} value={o}>{o} employees</option>)}
+                        </select>
+                    </Field>
+                    <Field label="Email">
+                        <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)}
+                            placeholder="contact@company.com" className="form-input" />
+                    </Field>
+                    <Field label="Country *">
+                        <select value={form.country} onChange={(e) => set('country', e.target.value)} className="form-input">
+                            <option value="">— Select country —</option>
+                            {COUNTRIES.map((c) => (
+                                <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                            ))}
+                        </select>
+                    </Field>
+                    <div className="md:col-span-2">
+                        <Field label="Location">
+                            <input value={form.location} onChange={(e) => set('location', e.target.value)}
+                                placeholder="City, address, or coordinates" className="form-input" />
+                        </Field>
+                    </div>
+                    <div className="md:col-span-2">
+                        <Field label="Description">
+                            <textarea value={form.description} onChange={(e) => set('description', e.target.value)}
+                                rows={3} maxLength={500} className="form-input resize-none" />
+                        </Field>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 rounded-b-lg">
+                    <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700 hover:text-slate-900">
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={send}
+                        disabled={!valid || busy}
+                        className="px-3 py-1.5 text-sm font-medium bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50 text-white rounded-md"
+                    >
+                        {busy ? 'Creating…' : 'Create company'}
+                    </button>
+                </div>
+
+                <style>{`.form-input{width:100%;padding:.5rem .75rem;font-size:.875rem;border:1px solid #cbd5e1;border-radius:.375rem}.form-input:focus{outline:none;box-shadow:0 0 0 2px rgba(15,23,42,.15)}`}</style>
+            </div>
         </div>
     );
 }

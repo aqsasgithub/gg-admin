@@ -121,39 +121,83 @@ export default function ImpersonateButton({ user, size = 'sm' }) {
                                     </div>
                                 </>
                             ) : (
-                                <>
-                                    <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-sm text-emerald-900">
-                                        Session started. Token expires in 15 min.
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-700 mb-1">
-                                            Customer app URL (one-tap to log in as {lastStarted.target_user?.email})
-                                        </label>
-                                        <div className="flex gap-1">
-                                            <input type="text" readOnly value={(lastStarted.login_url ?? lastStarted.customer_app_url) ?? ''}
-                                                className="flex-1 font-mono text-xs p-2 border border-slate-300 rounded-md bg-slate-50" />
-                                            <button type="button" onClick={() => navigator.clipboard.writeText((lastStarted.login_url ?? lastStarted.customer_app_url) ?? '')}
-                                                className="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50" title="Copy URL">
-                                                <Copy size={14} />
-                                            </button>
-                                            {(lastStarted.login_url ?? lastStarted.customer_app_url) && (
-                                                <a href={(lastStarted.login_url ?? lastStarted.customer_app_url)} target="_blank" rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-1 px-2 py-1 bg-guardian-navy hover:bg-guardian-navy-800 text-white rounded text-sm">
-                                                    <ExternalLink size={14} /> Open
-                                                </a>
+                                (() => {
+                                    const loginUrl = lastStarted.login_url ?? lastStarted.customer_app_url ?? null;
+                                    const expiresAt = lastStarted.expires_at
+                                        ? new Date(lastStarted.expires_at).toLocaleString()
+                                        : null;
+                                    return (
+                                        <>
+                                            <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-sm text-emerald-900">
+                                                Session started.{' '}
+                                                {expiresAt
+                                                    ? <>Link valid until <strong>{expiresAt}</strong>.</>
+                                                    : <>Link valid for the configured TTL (default 15 min).</>}
+                                            </div>
+
+                                            {!loginUrl ? (
+                                                <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-900">
+                                                    The server returned no login URL. Set <code>CUSTOMER_APP_URL</code>{' '}
+                                                    (or <code>FRONTEND_URL</code>) on the backend so an impersonation
+                                                    link can be built. The raw token is below if you need to construct
+                                                    the URL manually as <code>{'<customer-app>'}/impersonate?token=…</code>.
+                                                </div>
+                                            ) : null}
+
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-700 mb-1">
+                                                    Customer app URL (one-tap to log in as {lastStarted.target_user?.email})
+                                                </label>
+                                                <div className="flex gap-1">
+                                                    <input type="text" readOnly value={loginUrl ?? ''}
+                                                        placeholder="(no login URL returned)"
+                                                        className="flex-1 font-mono text-xs p-2 border border-slate-300 rounded-md bg-slate-50" />
+                                                    <button type="button"
+                                                        onClick={() => loginUrl && navigator.clipboard.writeText(loginUrl)}
+                                                        disabled={!loginUrl}
+                                                        className="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50" title="Copy URL">
+                                                        <Copy size={14} />
+                                                    </button>
+                                                    {loginUrl && (
+                                                        <a href={loginUrl} target="_blank" rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-1 px-2 py-1 bg-guardian-navy hover:bg-guardian-navy-800 text-white rounded text-sm">
+                                                            <ExternalLink size={14} /> Open
+                                                        </a>
+                                                    )}
+                                                </div>
+                                                <p className="text-xs text-slate-500 mt-1">
+                                                    Session ID: <code>{lastStarted.session_id}</code>
+                                                </p>
+                                            </div>
+
+                                            {/* Raw token surfaced so a fallback URL can be constructed when
+                                                the backend hasn't been able to assemble one. */}
+                                            {lastStarted.token && (
+                                                <details className="text-xs">
+                                                    <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+                                                        Raw JWT token (signed, expires {expiresAt ?? 'soon'})
+                                                    </summary>
+                                                    <div className="mt-1 flex gap-1">
+                                                        <input type="text" readOnly value={lastStarted.token}
+                                                            className="flex-1 font-mono text-[10px] p-2 border border-slate-300 rounded-md bg-slate-50" />
+                                                        <button type="button"
+                                                            onClick={() => navigator.clipboard.writeText(lastStarted.token)}
+                                                            className="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50" title="Copy token">
+                                                            <Copy size={12} />
+                                                        </button>
+                                                    </div>
+                                                </details>
                                             )}
-                                        </div>
-                                        <p className="text-xs text-slate-500 mt-1">
-                                            Session ID: <code>{lastStarted.session_id}</code>
-                                        </p>
-                                    </div>
-                                    <div className="flex justify-end pt-1">
-                                        <button type="button" onClick={closeModal}
-                                            className="px-3 py-1.5 text-sm font-medium bg-slate-800 hover:bg-slate-900 text-white rounded-md">
-                                            Done
-                                        </button>
-                                    </div>
-                                </>
+
+                                            <div className="flex justify-end pt-1">
+                                                <button type="button" onClick={closeModal}
+                                                    className="px-3 py-1.5 text-sm font-medium bg-slate-800 hover:bg-slate-900 text-white rounded-md">
+                                                    Done
+                                                </button>
+                                            </div>
+                                        </>
+                                    );
+                                })()
                             )}
                         </div>
                     </div>

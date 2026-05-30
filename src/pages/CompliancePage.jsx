@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Shield, Database, UserCheck } from 'lucide-react';
+import { ChevronRight, Shield, Database } from 'lucide-react';
+import AdminContextBar from '../components/admin/AdminContextBar';
 import {
     fetchModuleOverview, selectModuleOverview,
 } from '../features/admin/adminModuleDataSlice';
@@ -26,6 +27,7 @@ export default function CompliancePage() {
 
     return (
         <div className="p-6 space-y-4">
+            <AdminContextBar />
             <header>
                 <h1 className="text-2xl font-semibold text-guardian-navy flex items-center gap-2">
                     <Shield size={22} /> Compliance — Module Data
@@ -33,10 +35,7 @@ export default function CompliancePage() {
                 <p className="text-sm text-slate-600">
                     Direct CRUD access to Compliance datasets (per-domain results, generic
                     cache, and the CIS / ORS / TRS calculation rows that feed customer-facing
-                    risk scores). Records edited here are flagged with{' '}
-                    <code className="px-1 py-0.5 bg-slate-100 rounded text-xs">admin_modified_at</code> —
-                    the refresh job skips them so admin corrections persist into the next
-                    composite recompute.
+                    risk scores). Pick a company and domain above to scope what you see.
                 </p>
             </header>
 
@@ -58,10 +57,6 @@ export default function CompliancePage() {
                                 <div className="flex items-center gap-1">
                                     <Database size={12} className="text-slate-400" />
                                     <span className="font-semibold text-slate-900">{d.total_records.toLocaleString()}</span> total
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <UserCheck size={12} className="text-amber-600" />
-                                    <span className="font-semibold text-amber-700">{d.admin_modified.toLocaleString()}</span> admin-edited
                                 </div>
                             </div>
                         </Link>

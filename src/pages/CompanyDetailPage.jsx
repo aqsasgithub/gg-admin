@@ -43,6 +43,7 @@ import CompanyRateLimitsTab from '../components/admin/CompanyRateLimitsTab';
 import CompanyCostsTab from '../components/admin/CompanyCostsTab';
 import CompanyPricingTab from '../components/admin/CompanyPricingTab';
 import CompanyPrivacyTab from '../components/admin/CompanyPrivacyTab';
+import AdminAssessmentRunner from '../components/admin/AdminAssessmentRunner';
 
 /**
  * Rich per-company management. Five tabs:
@@ -332,6 +333,10 @@ function DomainsTab({ companyId }) {
                 </div>
             </div>
 
+            {list.length > 0 && (
+                <AdminAssessmentRunner companyId={companyId} domains={list} />
+            )}
+
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                 <table className="min-w-full text-sm">
                     <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -401,13 +406,12 @@ function DomainsTab({ companyId }) {
 
 function AddDomainModal({ open, onClose, onSubmit }) {
     const [domain, setDomain] = useState('');
-    const [environment, setEnvironment] = useState('production');
     const [busy, setBusy] = useState(false);
     if (!open) return null;
 
     const send = async () => {
         setBusy(true);
-        try { await onSubmit({ domain, environment }); setDomain(''); }
+        try { await onSubmit({ domain }); setDomain(''); }
         finally { setBusy(false); }
     };
 
@@ -417,11 +421,10 @@ function AddDomainModal({ open, onClose, onSubmit }) {
                 <ModalField label="Domain *">
                     <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" className="form-input" />
                 </ModalField>
-                <ModalField label="Environment">
-                    <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className="form-input">
-                        <option>production</option><option>staging</option><option>dr</option><option>corp</option>
-                    </select>
-                </ModalField>
+                <p className="text-xs text-slate-500">
+                    Hostname is lower-cased and stripped of scheme / path. Duplicates within this
+                    company are rejected.
+                </p>
             </div>
             <ModalActions onCancel={onClose} onSubmit={send}
                 submitLabel={busy ? 'Adding…' : 'Add'} submitDisabled={!domain || busy} />
