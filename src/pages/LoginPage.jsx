@@ -114,9 +114,25 @@ export default function LoginPage() {
                                     <input
                                         type="text"
                                         inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        pattern="\d{6}"
+                                        maxLength={6}
                                         required autoFocus
                                         value={otp}
-                                        onChange={(e) => setOtp(e.target.value)}
+                                        // Digits only: strips spaces/letters/symbols and auto-normalizes
+                                        // a pasted value like "123 456" → "123456" (max 6 digits).
+                                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        onPaste={(e) => {
+                                            e.preventDefault();
+                                            const digits = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+                                            setOtp(digits);
+                                        }}
+                                        onKeyDown={(e) => {
+                                            // Block non-digit printable keys (allow control/navigation keys).
+                                            if (e.key.length === 1 && !/\d/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+                                                e.preventDefault();
+                                            }
+                                        }}
                                         className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20 focus:border-guardian-navy font-mono tracking-widest"
                                         placeholder="123456"
                                     />
