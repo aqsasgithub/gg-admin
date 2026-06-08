@@ -43,11 +43,15 @@ import apiRequest from '../../api/client';
 
 const API_CONFIG = { showSuccessToast: false, showErrorToast: false };
 
-// Per-call timeout override for orchestrator runs. The global admin
-// axios timeout is 30s (api/client.js); single modules can take ~60s
-// on cold paths. 5 min is generous enough for any observed module
-// while still detecting a genuinely hung backend.
-const ORCHESTRATOR_TIMEOUT_MS = 5 * 60 * 1000;
+// Async runner: POST /admin/orchestrator/run now ENQUEUES a force scan job
+// (202) and the daemon runs it in the background, so the actual scan is never
+// bound by the HTTP / Cloudflare ~100s ceiling (no more 524 on slow modules
+// like application_security). We poll the job until it reaches a terminal
+// state. Each poll is a fast read, so the default 30s axios timeout is fine.
+const POLL_INTERVAL_MS = 2500;
+const POLL_MAX_MS       = 8 * 60 * 1000; // ceiling for one module's background run
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const errorOf = (e) => e?.response?.data?.message || e?.message || 'Assessment failed';
 
@@ -86,12 +90,46 @@ export const runAdminModule = createAsyncThunk(
     'adminAssessment/runModule',
     async ({ companyId, domainId, moduleName }, { rejectWithValue }) => {
         try {
+            // 1. Enqueue a force scan job (202 → ScanJob shape). Some modules
+            //    short-circuit synchronously (post-connect / not-enabled) and
+            //    return no job_id — pass those straight through.
             const res = await apiRequest.post('/admin/orchestrator/run', {
                 company_id:  companyId,
                 domain_id:   domainId,
                 module_name: moduleName,
-            }, { ...API_CONFIG, timeout: ORCHESTRATOR_TIMEOUT_MS });
-            return { domainId, moduleName, response: res.data };
+            }, API_CONFIG);
+
+            let job = res.data ?? {};
+            if (!job.job_id) {
+                return { domainId, moduleName, response: job };
+            }
+
+            // 2. Poll until the background daemon finishes the job. No HTTP /
+            //    Cloudflare timeout applies to the actual scan now.
+            const startedAt = Date.now();
+            while (!TERMINAL_STATUSES.includes(job.status)) {
+                if (Date.now() - startedAt > POLL_MAX_MS) {
+                    return rejectWithValue({
+                        domainId, moduleName,
+                        error: 'Timed out waiting for the scan to finish.',
+                    });
+                }
+                await sleep(POLL_INTERVAL_MS);
+                const poll = await apiRequest.get(
+                    `/admin/orchestrator/job/${job.job_id}`, API_CONFIG,
+                );
+                job = poll.data ?? job;
+            }
+
+            // 3. Map the terminal job to the response shape the runner expects
+            //    (success / degraded / summary). A "degraded" run is still a
+            //    completed job — the upstream was unavailable for some steps.
+            const sum = job.result_summary ?? {};
+            const response = job.status === 'completed'
+                ? { success: true,  degraded: !!sum.degraded, summary: sum, steps: [], message: sum.message ?? null }
+                : { success: false, degraded: false,          summary: sum, steps: [], message: job.error ?? 'Scan failed' };
+
+            return { domainId, moduleName, response };
         } catch (e) {
             return rejectWithValue({ domainId, moduleName, error: errorOf(e) });
         }
