@@ -32,6 +32,7 @@ import {
 import LicensePlanBadge from '../components/admin/LicensePlanBadge';
 import ModuleEntitlementsGrid from '../components/admin/ModuleEntitlementsGrid';
 import AdminConfirmModal from '../components/admin/AdminConfirmModal';
+import CompanyUsersTab from '../components/admin/CompanyUsersTab';
 import CompanyAssetsTab from '../components/admin/CompanyAssetsTab';
 import CompanyAlertsTab from '../components/admin/CompanyAlertsTab';
 import CompanyScansTab from '../components/admin/CompanyScansTab';
@@ -59,6 +60,7 @@ import AdminAssessmentRunner from '../components/admin/AdminAssessmentRunner';
 
 const TABS = [
     { key: 'overview',     label: 'Overview',     icon: LayoutDashboard },
+    { key: 'users',        label: 'Users',        icon: Users },
     { key: 'domains',      label: 'Domains',      icon: Globe },
     { key: 'assets',       label: 'Assets',       icon: Wifi },
     { key: 'alerts',       label: 'Alerts',       icon: AlertTriangle },
@@ -132,6 +134,7 @@ export default function CompanyDetailPage() {
 
             <div className="flex-1 overflow-y-auto p-6">
                 {tab === 'overview'     && <OverviewTab            companyId={companyId} detail={detail} />}
+                {tab === 'users'        && <CompanyUsersTab        companyId={companyId} />}
                 {tab === 'domains'      && <DomainsTab             companyId={companyId} />}
                 {tab === 'assets'       && <AssetsTab              companyId={companyId} />}
                 {tab === 'alerts'       && <CompanyAlertsTab       companyId={companyId} />}
