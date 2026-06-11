@@ -15,6 +15,7 @@ import AdminContextBar from '../components/admin/AdminContextBar';
 import {
     selectAdminContextCompanyId, selectAdminContextDomainId,
 } from '../features/admin/adminContextSlice';
+import { fetchAdminCompanies } from '../features/admin/adminCompaniesSlice';
 
 /**
  * /modules/:module/:dataset
@@ -61,6 +62,13 @@ export default function ModuleDatasetPage() {
     }, [dispatch, module, dataset, filters, ctxCompanyId, ctxDomainId]);
 
     const meta          = bucket?.meta;
+    // Company-level datasets (e.g. brand-protection social indicators) apply to
+    // the whole company — no domain needed; the form shows a company dropdown.
+    const companyLevel  = !!meta?.company_level;
+    const companies     = useSelector((s) => s.adminCompanies.list || []);
+    useEffect(() => {
+        if (companyLevel && companies.length === 0) dispatch(fetchAdminCompanies());
+    }, [dispatch, companyLevel, companies.length]);
     // Shape detection — see file header. `list_fields` wins when both
     // are present (a controller could theoretically expose both).
     const tabularMode   = Array.isArray(meta?.list_fields) && meta.list_fields.length > 0;
@@ -213,6 +221,9 @@ export default function ModuleDatasetPage() {
                         payloadColumn={payloadColumn}
                         extraFields={extraFields}
                         datasetLabel={datasetLabel}
+                        companyLevel={companyLevel}
+                        companies={companies}
+                        ctxCompanyId={ctxCompanyId}
                         onClose={() => setEditing(null)}
                         onSave={onSave}
                     />
@@ -271,13 +282,13 @@ function Row({ row, columns, tabularMode, onEdit, onDelete }) {
 
 // ── Legacy single-payload form modal (BP / DS / AS) ──────────────────
 
-function PayloadRecordFormModal({ record, payloadColumn, extraFields, datasetLabel, onClose, onSave }) {
+function PayloadRecordFormModal({ record, payloadColumn, extraFields, datasetLabel, companyLevel = false, companies = [], ctxCompanyId = '', onClose, onSave }) {
     const isCreate = !record?.id;
 
     const [form, setForm] = useState(() => {
         const initial = {
             domain_id:  record?.domain_id  ?? '',
-            company_id: record?.company_id ?? '',
+            company_id: record?.company_id ?? (companyLevel ? (ctxCompanyId || '') : ''),
             domain:     record?.domain     ?? '',
         };
         for (const f of extraFields) initial[f] = record?.[f] ?? '';
@@ -299,10 +310,19 @@ function PayloadRecordFormModal({ record, payloadColumn, extraFields, datasetLab
             setError(`The ${payloadColumn} field must be valid JSON: ${e.message}`);
             return;
         }
+        // Company-level records must carry an explicit company; block submit
+        // with a clear message rather than a server 422.
+        if (companyLevel && !form.company_id) {
+            setError('Please select a company.');
+            return;
+        }
         setBusy(true);
         try {
             const payload = { ...form, [payloadColumn]: parsedPayload };
             for (const f of extraFields) if (payload[f] === '') payload[f] = null;
+            // Company-level: no domain; send the chosen company_id in the body
+            // (body wins over the context header on the server).
+            if (companyLevel) { payload.domain = null; payload.domain_id = null; }
             await onSave({ ...payload, id: record?.id });
         } finally {
             setBusy(false);
@@ -311,10 +331,31 @@ function PayloadRecordFormModal({ record, payloadColumn, extraFields, datasetLab
 
     return (
         <FormShell isCreate={isCreate} datasetLabel={datasetLabel} onClose={onClose} onSubmit={submit} busy={busy} error={error}>
-            <p className="text-[11px] text-slate-500 -mt-1 mb-1">
-                Company and domain are taken from the picker above — no need to enter IDs.
-            </p>
-            <Field label="Domain *" value={form.domain} onChange={(v) => setField('domain', v)} placeholder="example.com" />
+            {companyLevel ? (
+                <div>
+                    <p className="text-[11px] text-slate-500 -mt-1 mb-2">
+                        Applies to the whole company / brand — every domain shows the same brand-protection intel.
+                    </p>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Company *</label>
+                    <select
+                        value={form.company_id}
+                        onChange={(e) => setField('company_id', e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                    >
+                        <option value="">— Select a company —</option>
+                        {companies.map((c) => (
+                            <option key={c.id} value={c.id}>{(c.name || 'Unnamed')} ({c.id})</option>
+                        ))}
+                    </select>
+                </div>
+            ) : (
+                <>
+                    <p className="text-[11px] text-slate-500 -mt-1 mb-1">
+                        Company and domain are taken from the picker above — no need to enter IDs.
+                    </p>
+                    <Field label="Domain *" value={form.domain} onChange={(v) => setField('domain', v)} placeholder="example.com" />
+                </>
+            )}
 
             {extraFields.map((f) => (
                 <Field key={f} label={humanizeField(f)} value={form[f] ?? ''} onChange={(v) => setField(f, v)} />
