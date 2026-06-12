@@ -31,29 +31,42 @@ export default function ImpersonateButton({ user, size = 'sm' }) {
 
     const submit = async () => {
         if (!reason.trim() || reason.trim().length < 5) return;
+
+        // Open the tab SYNCHRONOUSLY inside the click gesture. Browsers block
+        // window.open that runs after an `await` (not a user-initiated action),
+        // which made impersonation look like it did nothing. We open a blank
+        // tab now and redirect it to the impersonation URL once the token
+        // returns. NOTE: no `noopener` — that forces window.open to return
+        // null, and we need the handle to set .location later. The target is
+        // our own customer app, so there's no untrusted-opener risk.
+        const popup = window.open('about:blank', '_blank');
+
         setBusy(true);
         try {
             const action = await dispatch(startImpersonation({
                 userId: user.id, reason: reason.trim(), durationMinutes: ttl,
             }));
-            // Pass F / Task 5 — auto-open the customer app in a new tab on
-            // success. Falls back to the manual Open/Copy buttons in the
-            // success state below when popup is blocked.
             const payload = action?.payload || action;
             const url = payload?.login_url
                 ?? payload?.customer_app_url
                 ?? payload?.data?.login_url
                 ?? payload?.data?.customer_app_url;
-            if (url) {
-                const popup = window.open(url, '_blank', 'noopener,noreferrer');
-                if (!popup || popup.closed) {
-                    // Popup blocked — the success state shows the URL with
-                    // a Copy button + Open anchor as a fallback.
-                    try { (await import('react-hot-toast')).default.error(
-                        'Pop-up blocked. Use the Open button or copy the URL.',
-                    ); } catch { /* toast may not be available in some test envs */ }
-                }
+
+            if (url && popup && !popup.closed) {
+                // Redirect the pre-opened tab — not blocked since it already exists.
+                popup.location = url;
+            } else if (url) {
+                // Tab was blocked even synchronously (aggressive blocker) —
+                // the success state below still shows Open/Copy as a fallback.
+                try { (await import('react-hot-toast')).default.error(
+                    'Pop-up blocked. Use the Open button or copy the URL below.',
+                ); } catch { /* toast may be unavailable in some envs */ }
+            } else {
+                // No URL (the start failed) — close the blank tab we opened.
+                if (popup && !popup.closed) popup.close();
             }
+        } catch {
+            if (popup && !popup.closed) popup.close();
         } finally { setBusy(false); }
     };
 

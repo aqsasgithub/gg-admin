@@ -70,6 +70,15 @@ export default function CompanyUsersTab({ companyId }) {
         } catch (e) { toast.error(errOf(e)); }
     };
 
+    // Re-invite: re-send a fresh link to someone who missed/lost their invite.
+    const resend = async (inv) => {
+        try {
+            const res = await apiRequest.post(`/admin/invitations/${inv.id}/resend`, {}, CFG);
+            toast.success(res.data?.message || 'Invitation re-sent.');
+            await load();
+        } catch (e) { toast.error(errOf(e)); }
+    };
+
     return (
         <div className="space-y-6">
             {/* Invite */}
@@ -168,9 +177,13 @@ export default function CompanyUsersTab({ companyId }) {
                     <div className="px-4 py-2.5 border-b border-slate-100 text-sm font-semibold text-slate-800">Pending invitations ({data.pending_invites.length})</div>
                     <ul className="divide-y divide-slate-50">
                         {data.pending_invites.map((i) => (
-                            <li key={i.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                                <span className="text-slate-700">{i.email}</span>
-                                <span className="text-xs text-slate-400">invited as {i.role} · expires {i.expires_at ? new Date(i.expires_at).toLocaleDateString() : '-'}</span>
+                            <li key={i.id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                                <span className="text-slate-700 truncate">{i.email}</span>
+                                <div className="flex items-center gap-3 flex-shrink-0">
+                                    <span className="text-xs text-slate-400">invited as {i.role} · expires {i.expires_at ? new Date(i.expires_at).toLocaleDateString() : '-'}</span>
+                                    <button onClick={() => resend(i)} title="Re-send a fresh invitation link"
+                                        className="text-xs font-semibold text-guardian-navy hover:underline">Resend</button>
+                                </div>
                             </li>
                         ))}
                     </ul>
