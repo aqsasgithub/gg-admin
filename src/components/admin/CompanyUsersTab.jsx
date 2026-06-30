@@ -1,6 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import { UserPlus, Trash2, Loader2, ShieldCheck, Crown, Eye, PencilLine } from 'lucide-react';
+import {
+    UserPlus, Trash2, Loader2, ShieldCheck, Crown, Eye, EyeOff, PencilLine,
+    Plus, X, RefreshCw,
+} from 'lucide-react';
 import apiRequest from '../../api/client';
 import AdminConfirmModal from './AdminConfirmModal';
 
@@ -20,6 +23,11 @@ const ALL_ROLES = ['viewer', 'manager', 'owner'];
  * customer never manages this. Lists members + their per-company role, invites
  * new members by email (sends the branded invite email), changes roles, and
  * removes members. The company creator is always an owner and is locked.
+ *
+ * Task 01: alongside the email-invite flow, admins can now ALSO add a user
+ * directly (the "Add user" button → AddMemberModal). That creates a real,
+ * login-ready users row mapped to THIS company (company_id + company_role),
+ * so when the new user logs in the customer app shows this same company.
  */
 export default function CompanyUsersTab({ companyId }) {
     const [data, setData] = useState({ members: [], pending_invites: [] });
@@ -28,6 +36,7 @@ export default function CompanyUsersTab({ companyId }) {
     const [inviteRole, setInviteRole] = useState('viewer');
     const [inviting, setInviting] = useState(false);
     const [confirm, setConfirm] = useState(null); // { member }
+    const [showAdd, setShowAdd] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -51,6 +60,20 @@ export default function CompanyUsersTab({ companyId }) {
             await load();
         } catch (e) { toast.error(errOf(e)); }
         finally { setInviting(false); }
+    };
+
+    // Task 01: create a real user directly and map to this company. We send
+    // company_id explicitly in the payload (the route param stays authoritative
+    // server-side) per the agreed contract.
+    const addUser = async (payload) => {
+        const res = await apiRequest.post(
+            `/admin/companies/${companyId}/members/add`,
+            { ...payload, company_id: companyId },
+            CFG,
+        );
+        toast.success(res.data?.message || 'User added.');
+        setShowAdd(false);
+        await load();
     };
 
     const changeRole = async (member, role) => {
@@ -81,13 +104,22 @@ export default function CompanyUsersTab({ companyId }) {
 
     return (
         <div className="space-y-6">
-            {/* Invite */}
+            {/* Invite + Add user */}
             <form onSubmit={invite} className="bg-white border border-slate-200 rounded-lg p-4">
-                <div className="text-sm font-semibold text-slate-800 mb-1">Invite a member</div>
-                <p className="text-xs text-slate-500 mb-3">
-                    Sends a branded invitation email. The recipient sets their own password and joins this company. A user can belong to only one company.
-                </p>
-                <div className="flex flex-wrap items-end gap-2">
+                <div className="flex items-start justify-between gap-3 mb-1">
+                    <div>
+                        <div className="text-sm font-semibold text-slate-800">Invite a member</div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Sends a branded invitation email. The recipient sets their own password and joins this company. A user can belong to only one company.
+                        </p>
+                    </div>
+                    {/* Task 01: second action — add a user directly (no email round-trip). */}
+                    <button type="button" onClick={() => setShowAdd(true)}
+                        className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 border border-guardian-navy text-guardian-navy text-sm font-medium rounded-md hover:bg-guardian-navy/5">
+                        <Plus size={14} /> Add user
+                    </button>
+                </div>
+                <div className="flex flex-wrap items-end gap-2 mt-3">
                     <div className="flex-1 min-w-[220px]">
                         <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
                         <input type="email" required value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
@@ -108,6 +140,7 @@ export default function CompanyUsersTab({ companyId }) {
                 </div>
                 <p className="text-[11px] text-slate-400 mt-2">
                     Owner can add domains. Manager can edit but not add domains. Viewer is read-only. Promote to Owner from the table below after they join.
+                    <span className="text-slate-500"> Use <span className="font-medium">Add user</span> to create a login-ready account immediately instead of emailing an invite.</span>
                 </p>
             </form>
 
@@ -190,6 +223,13 @@ export default function CompanyUsersTab({ companyId }) {
                 </div>
             )}
 
+            {showAdd && (
+                <AddMemberModal
+                    onClose={() => setShowAdd(false)}
+                    onSubmit={addUser}
+                />
+            )}
+
             {confirm && (
                 <AdminConfirmModal
                     open
@@ -202,5 +242,163 @@ export default function CompanyUsersTab({ companyId }) {
                 />
             )}
         </div>
+    );
+}
+
+// ── Add-user-directly modal ──────────────────────────────────────────────────
+// Creates a real, login-ready user mapped to this company. Collects everything
+// the backend requires: name, email, a strong password, and the company role.
+// Mirrors the server password policy (min 12, mixed case, letter, number,
+// symbol) so the Add button only enables on a valid payload.
+
+const PW_MIN = 12;
+const pwChecks = (pw) => ({
+    len:    pw.length >= PW_MIN,
+    lower:  /[a-z]/.test(pw),
+    upper:  /[A-Z]/.test(pw),
+    digit:  /\d/.test(pw),
+    symbol: /[^A-Za-z0-9]/.test(pw),
+});
+
+function generatePassword() {
+    const U = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const L = 'abcdefghijkmnpqrstuvwxyz';
+    const D = '23456789';
+    const S = '!@#$%^&*?-_';
+    const all = U + L + D + S;
+    const rand = (n) => {
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n;
+        }
+        return Math.floor(Math.random() * n);
+    };
+    const pick = (set) => set[rand(set.length)];
+    const chars = [pick(U), pick(L), pick(D), pick(S)];
+    for (let i = chars.length; i < 16; i++) chars.push(pick(all));
+    // Fisher–Yates shuffle so the guaranteed-class chars aren't always leading.
+    for (let i = chars.length - 1; i > 0; i--) {
+        const j = rand(i + 1);
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+}
+
+function AddMemberModal({ onClose, onSubmit }) {
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [role, setRole] = useState('viewer');
+    const [showPw, setShowPw] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+
+    const checks = useMemo(() => pwChecks(password), [password]);
+    const passwordValid = Object.values(checks).every(Boolean);
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const valid = name.trim() && emailValid && passwordValid;
+
+    const submit = async (e) => {
+        e.preventDefault();
+        if (!valid || submitting) return;
+        setSubmitting(true);
+        try {
+            await onSubmit({ name: name.trim(), email: email.trim(), password, role });
+        } catch (err) {
+            toast.error(err?.response?.data?.message || err?.message || 'Could not add the user.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={onClose}>
+            <form onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}
+                className="w-full max-w-md bg-white rounded-lg shadow-xl border border-slate-200">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                    <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                        <UserPlus size={16} /> Add user to this company
+                    </div>
+                    <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+                        <X size={16} />
+                    </button>
+                </div>
+
+                <div className="p-4 space-y-3">
+                    <p className="text-xs text-slate-500">
+                        Creates an active account mapped to this company. The user can sign in immediately with the password you set — share it securely.
+                    </p>
+
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Full name</label>
+                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} required
+                            placeholder="Jane Doe"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20" />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
+                            placeholder="user@example.com"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20" />
+                        {email && !emailValid && <p className="text-[11px] text-red-500 mt-1">Enter a valid email address.</p>}
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
+                        <div className="flex items-center gap-2">
+                            <div className="relative flex-1">
+                                <input type={showPw ? 'text' : 'password'} value={password}
+                                    onChange={(e) => setPassword(e.target.value)} required
+                                    placeholder="Min 12 chars"
+                                    className="w-full px-3 py-2 pr-9 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20" />
+                                <button type="button" onClick={() => setShowPw((v) => !v)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                    {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                                </button>
+                            </div>
+                            <button type="button" onClick={() => { setPassword(generatePassword()); setShowPw(true); }}
+                                title="Generate a strong password"
+                                className="inline-flex items-center gap-1 px-2.5 py-2 text-xs border border-slate-300 rounded-md text-slate-600 hover:bg-slate-50">
+                                <RefreshCw size={13} /> Generate
+                            </button>
+                        </div>
+                        {password && !passwordValid && (
+                            <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+                                <Req ok={checks.len}>12+ characters</Req>
+                                <Req ok={checks.upper}>Uppercase</Req>
+                                <Req ok={checks.lower}>Lowercase</Req>
+                                <Req ok={checks.digit}>Number</Req>
+                                <Req ok={checks.symbol}>Symbol</Req>
+                            </ul>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Role</label>
+                        <select value={role} onChange={(e) => setRole(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20">
+                            {INVITE_ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label} — {ROLE_META[r].hint}</option>)}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-100">
+                    <button type="button" onClick={onClose}
+                        className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-md">Cancel</button>
+                    <button type="submit" disabled={!valid || submitting}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-guardian-navy text-white rounded-md hover:opacity-90 disabled:opacity-50">
+                        {submitting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Add user
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+function Req({ ok, children }) {
+    return (
+        <li className={`flex items-center gap-1 ${ok ? 'text-emerald-600' : 'text-slate-400'}`}>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            {children}
+        </li>
     );
 }
