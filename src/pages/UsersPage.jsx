@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { UserPlus, Pause, Play, Key, ShieldPlus, MoreHorizontal, Mail, Trash2, Building2, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { UserPlus, Pause, Play, Key, ShieldPlus, MoreHorizontal, Mail, Trash2, Building2, Eye, EyeOff, RefreshCw, Pencil } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import {
-    fetchAdminUsers, inviteUser, createUser, suspendUser, reinstateUser, resetUserPassword,
+    fetchAdminUsers, inviteUser, createUser, updateUser, suspendUser, reinstateUser, resetUserPassword,
     grantAdminRole, revokeAdminRole,
     selectAdminUsers, selectAdminUsersMeta, selectAdminUsersLoading, selectAdminUserWorking,
 } from '../features/admin/adminUsersSlice';
@@ -46,6 +46,7 @@ export default function AdminUsers() {
     const [showInvite, setShowInvite] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
     const [createCompanyFor, setCreateCompanyFor] = useState(null); // user object
+    const [editTarget, setEditTarget] = useState(null);             // user being edited
     const [confirm,  setConfirm]   = useState(null);    // {type, user}
     const [roleMenu, setRoleMenu]  = useState(null);    // user id whose dropdown is open
 
@@ -140,6 +141,7 @@ export default function AdminUsers() {
                                 }}
                                 onAction={(type, role) => setConfirm({ type, user: u, role })}
                                 onCreateCompany={() => setCreateCompanyFor(u)}
+                                onEdit={() => setEditTarget(u)}
                             />
                         ))}
                     </tbody>
@@ -184,6 +186,17 @@ export default function AdminUsers() {
                 }}
             />
 
+            <EditUserModal
+                user={editTarget}
+                onClose={() => setEditTarget(null)}
+                onSubmit={async (data) => {
+                    const res = await dispatch(updateUser({ userId: editTarget.id, data }));
+                    if (updateUser.fulfilled.match(res)) {
+                        setEditTarget(null);
+                    }
+                }}
+            />
+
             <AdminConfirmModal
                 open={confirm?.type === 'suspend'}
                 title={`Suspend ${confirm?.user?.email}?`}
@@ -224,7 +237,7 @@ export default function AdminUsers() {
 
 // ── Row -------------------------------------------------------------------
 
-function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu, onCreateCompany }) {
+function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu, onCreateCompany, onEdit }) {
     const working = useSelector((s) => selectAdminUserWorking(s, user.id));
     const isSuspended = user.status === 'suspended';
     // One-company-per-user is enforced by the backend; reflect it in the UI
@@ -269,6 +282,11 @@ function UserRow({ user, onAction, onGrantRole, roleMenuOpen, onToggleRoleMenu, 
                         The component renders null if the current admin lacks
                         the impersonation.act capability. */}
                     <ImpersonateButton user={user} />
+                    <IconAction
+                        icon={Pencil}
+                        title="Edit user (name & email)"
+                        onClick={onEdit}
+                    />
                     {!hasCompany && (
                         <IconAction
                             icon={Building2}
@@ -481,6 +499,86 @@ function Field({ label, children }) {
         <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">{label}</label>
             {children}
+        </div>
+    );
+}
+
+// ── Edit User modal ──────────────────────────────────────────────────────
+//
+// Edits an existing user's name + email. Maps to PUT /admin/users/{id} →
+// AdminUserController::update. Email IS editable here (validated unique
+// server-side). Only fields that actually changed are sent.
+function EditUserModal({ user, onClose, onSubmit }) {
+    const [name, setName]   = useState('');
+    const [email, setEmail] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (user) { setName(user.name ?? ''); setEmail(user.email ?? ''); }
+    }, [user]);
+
+    if (!user) return null;
+
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const dirty = name !== (user.name ?? '') || email !== (user.email ?? '');
+    const valid = name.trim() && emailValid && dirty;
+
+    const save = async () => {
+        setSubmitting(true);
+        try {
+            const data = {};
+            if (name !== (user.name ?? ''))   data.name  = name.trim();
+            if (email !== (user.email ?? '')) data.email = email.trim();
+            await onSubmit(data);
+        } finally { setSubmitting(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="w-full max-w-md mx-4 bg-white rounded-lg shadow-xl">
+                <div className="p-5 border-b border-slate-100">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+                        <Pencil size={16} className="text-guardian-navy" /> Edit user
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-1">{user.id}</p>
+                </div>
+
+                <div className="p-5 space-y-3">
+                    <Field label="Full name">
+                        <input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            type="text"
+                            placeholder="Jane Doe"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                        />
+                    </Field>
+                    <Field label="Email">
+                        <input
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            type="email"
+                            placeholder="user@example.com"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20"
+                        />
+                        {email && !emailValid && <p className="text-[11px] text-red-500 mt-1">Enter a valid email address.</p>}
+                    </Field>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 px-5 py-3 bg-slate-50 rounded-b-lg">
+                    <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-700 hover:text-slate-900">
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={save}
+                        disabled={!valid || submitting}
+                        className="px-3 py-1.5 text-sm font-medium bg-guardian-navy hover:bg-guardian-navy-800 disabled:opacity-50 text-white rounded-md"
+                    >
+                        {submitting ? 'Saving...' : 'Save changes'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

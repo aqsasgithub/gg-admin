@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import {
     UserPlus, Trash2, Loader2, ShieldCheck, Crown, Eye, EyeOff, PencilLine,
-    Plus, X, RefreshCw,
+    Plus, X, RefreshCw, Pencil,
 } from 'lucide-react';
 import apiRequest from '../../api/client';
 import AdminConfirmModal from './AdminConfirmModal';
@@ -37,6 +37,7 @@ export default function CompanyUsersTab({ companyId }) {
     const [inviting, setInviting] = useState(false);
     const [confirm, setConfirm] = useState(null); // { member }
     const [showAdd, setShowAdd] = useState(false);
+    const [editTarget, setEditTarget] = useState(null); // member being edited
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -82,6 +83,14 @@ export default function CompanyUsersTab({ companyId }) {
             toast.success(`${member.email} is now ${role}.`);
             await load();
         } catch (e) { toast.error(errOf(e)); }
+    };
+
+    // Edit a member's profile (name + email). Role has its own dropdown.
+    const editMember = async (data) => {
+        const res = await apiRequest.put(`/admin/companies/${companyId}/members/${editTarget.id}`, data, CFG);
+        toast.success(res.data?.message || 'Member updated.');
+        setEditTarget(null);
+        await load();
     };
 
     const remove = async (member) => {
@@ -180,6 +189,10 @@ export default function CompanyUsersTab({ companyId }) {
                                         <td className="px-4 py-2.5 text-xs text-slate-500 capitalize">{m.status || 'active'}</td>
                                         <td className="px-4 py-2.5">
                                             <div className="flex items-center justify-end gap-2">
+                                                <button onClick={() => setEditTarget(m)} title="Edit name & email"
+                                                    className="p-1.5 text-slate-400 hover:text-guardian-navy rounded-md hover:bg-slate-100">
+                                                    <Pencil size={14} />
+                                                </button>
                                                 {m.is_creator ? (
                                                     <span className="text-[11px] text-slate-400">Creator · locked</span>
                                                 ) : (
@@ -227,6 +240,14 @@ export default function CompanyUsersTab({ companyId }) {
                 <AddMemberModal
                     onClose={() => setShowAdd(false)}
                     onSubmit={addUser}
+                />
+            )}
+
+            {editTarget && (
+                <EditMemberModal
+                    member={editTarget}
+                    onClose={() => setEditTarget(null)}
+                    onSubmit={editMember}
                 />
             )}
 
@@ -387,6 +408,76 @@ function AddMemberModal({ onClose, onSubmit }) {
                     <button type="submit" disabled={!valid || submitting}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-guardian-navy text-white rounded-md hover:opacity-90 disabled:opacity-50">
                         {submitting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Add user
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+// ── Edit-member modal ────────────────────────────────────────────────────────
+// Edits a member's name + email. Role is managed by the inline dropdown, so it
+// isn't repeated here. Email is editable and validated unique server-side.
+function EditMemberModal({ member, onClose, onSubmit }) {
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (member) { setName(member.name ?? ''); setEmail(member.email ?? ''); }
+    }, [member]);
+
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const dirty = name !== (member.name ?? '') || email !== (member.email ?? '');
+    const valid = name.trim() && emailValid && dirty;
+
+    const submit = async (e) => {
+        e.preventDefault();
+        if (!valid || submitting) return;
+        setSubmitting(true);
+        try {
+            const data = {};
+            if (name !== (member.name ?? ''))   data.name  = name.trim();
+            if (email !== (member.email ?? '')) data.email = email.trim();
+            await onSubmit(data);
+        } catch (err) {
+            toast.error(err?.response?.data?.message || err?.message || 'Could not update the member.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={onClose}>
+            <form onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}
+                className="w-full max-w-md bg-white rounded-lg shadow-xl border border-slate-200">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                    <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                        <Pencil size={16} /> Edit member
+                    </div>
+                    <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+                        <X size={16} />
+                    </button>
+                </div>
+                <div className="p-4 space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Full name</label>
+                        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-guardian-navy/20" />
+                        {email && !emailValid && <p className="text-[11px] text-red-500 mt-1">Enter a valid email address.</p>}
+                    </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-100">
+                    <button type="button" onClick={onClose}
+                        className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-md">Cancel</button>
+                    <button type="submit" disabled={!valid || submitting}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-guardian-navy text-white rounded-md hover:opacity-90 disabled:opacity-50">
+                        {submitting ? <Loader2 size={14} className="animate-spin" /> : <Pencil size={14} />} Save changes
                     </button>
                 </div>
             </form>

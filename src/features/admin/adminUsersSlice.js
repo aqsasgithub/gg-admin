@@ -74,6 +74,25 @@ export const createUser = createAsyncThunk(
     },
 );
 
+/**
+ * Edit an existing user's profile (name + email). Maps to
+ * PUT /admin/users/{id} → AdminUserController::update. Email is editable
+ * and validated unique server-side. Only changed fields are sent.
+ */
+export const updateUser = createAsyncThunk(
+    'adminUsers/updateUser',
+    async ({ userId, data }, { rejectWithValue }) => {
+        try {
+            const res = await apiRequest.put(`/admin/users/${userId}`, data, API_CONFIG);
+            toast.success('User updated');
+            return res.data?.data;
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue(errorOf(e));
+        }
+    },
+);
+
 export const suspendUser = createAsyncThunk(
     'adminUsers/suspendUser',
     async ({ userId, reason }, { rejectWithValue }) => {
@@ -195,7 +214,9 @@ const adminUsersSlice = createSlice({
             })
             .addCase(reinstateUser.rejected,     (s, a) => { delete s.working[a.meta.arg]; })
 
-            .addCase(inviteUser.fulfilled,       () => { /* list refresh handled by caller */ });
+            .addCase(inviteUser.fulfilled,       () => { /* list refresh handled by caller */ })
+
+            .addCase(updateUser.fulfilled,       (s, a) => { patchRow(s, a.payload); });
     },
 });
 
