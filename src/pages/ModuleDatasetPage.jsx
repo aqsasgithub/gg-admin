@@ -102,6 +102,17 @@ export default function ModuleDatasetPage() {
         setDeleting(null);
     };
 
+    // The paginated list row intentionally omits the heavy payload column
+    // (`meta` for social indicators, `findings`/etc. elsewhere) to keep the
+    // index light; the edit click loads the full row — with the payload — into
+    // `byId` via fetchDatasetRecord. Merge that in so the form is populated with
+    // the real payload instead of `null`. `editKey` flips from `list` to `full`
+    // once the full row arrives, remounting the modal (it reads `record` only in
+    // its useState initialiser) so the payload textarea re-initialises with it.
+    const editFull   = editing?.id ? bucket?.byId?.[editing.id] : null;
+    const editRecord = editing ? { ...editing, ...(editFull ?? {}) } : null;
+    const editKey    = editing ? `${editing.id ?? 'new'}:${editFull ? 'full' : 'list'}` : 'none';
+
     return (
         <div className="p-6 space-y-4">
             <AdminContextBar />
@@ -208,7 +219,8 @@ export default function ModuleDatasetPage() {
             {editing !== null && (
                 tabularMode ? (
                     <TabularRecordFormModal
-                        record={editing}
+                        key={editKey}
+                        record={editRecord}
                         listFields={listFields}
                         fullFields={fullFields}
                         datasetLabel={datasetLabel}
@@ -217,7 +229,8 @@ export default function ModuleDatasetPage() {
                     />
                 ) : (
                     <PayloadRecordFormModal
-                        record={editing}
+                        key={editKey}
+                        record={editRecord}
                         payloadColumn={payloadColumn}
                         extraFields={extraFields}
                         datasetLabel={datasetLabel}
