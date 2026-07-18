@@ -64,6 +64,11 @@ import adminAssessment    from '../features/admin/adminAssessmentSlice';
 // X-Admin-Company-Id / X-Admin-Domain-Id headers on /admin/modules/* calls.
 import adminContext       from '../features/admin/adminContextSlice';
 
+// Operator notification center ("my bell") — the admin's own notifications
+// (approvals, license applications, queue failures). Distinct from
+// adminNotifications, which is the cross-tenant delivery LOG.
+import meNotifications    from '../features/admin/meNotificationsSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -117,6 +122,8 @@ export const store = configureStore({
         adminAssessment,
         // Module CRUD picker context
         adminContext,
+        // Operator notification center ("my bell")
+        meNotifications,
     },
 });
 

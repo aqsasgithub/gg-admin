@@ -33,6 +33,7 @@ import IssuesPage                from './pages/IssuesPage';
 import IntegrationsPage          from './pages/IntegrationsPage';
 import TicketsPage               from './pages/TicketsPage';
 import NotificationLogPage       from './pages/NotificationLogPage';
+import MyNotificationsPage        from './pages/MyNotificationsPage';
 import PrivacyOperationsPage     from './pages/PrivacyOperationsPage';
 import ImpersonationSessionsPage from './pages/ImpersonationSessionsPage';
 import FeatureFlagsPage          from './pages/FeatureFlagsPage';
@@ -125,6 +126,7 @@ export default function App() {
                     <Route path="/system-health"      element={<SystemHealthPage />} />
                     <Route path="/jobs"               element={<JobsPage />} />
                     <Route path="/notifications"      element={<NotificationLogPage />} />
+                    <Route path="/me/notifications"   element={<MyNotificationsPage />} />
                     <Route path="/integrations"       element={<IntegrationsPage />} />
                     <Route path="/tickets"            element={<TicketsPage />} />
                     <Route path="/feature-flags"      element={<FeatureFlagsPage />} />
