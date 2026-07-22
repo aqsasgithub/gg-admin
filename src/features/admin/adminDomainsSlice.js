@@ -109,6 +109,67 @@ export const removeDomain = createAsyncThunk(
     },
 );
 
+// ── Network Security target IPs ─────────────────────────────────────────
+// Admin acts on behalf of the tenant. Used ONLY by the Network Security
+// module — configured IPs are scanned instead of DNS-resolving the domain
+// (fixes CDN/WAF edge IPs). Mutations resync the authoritative list so the
+// server-side single-primary rule is reflected exactly.
+
+export const fetchNetworkTargets = createAsyncThunk(
+    'adminDomains/fetchNetworkTargets',
+    async ({ companyId, domainId }, { rejectWithValue }) => {
+        try {
+            const res = await apiRequest.get(`/admin/domains/${domainId}/network-targets`, API_CONFIG);
+            return { companyId, domainId, targets: res.data?.data ?? [] };
+        } catch (e) { return rejectWithValue({ companyId, error: errorOf(e) }); }
+    },
+);
+
+export const addNetworkTarget = createAsyncThunk(
+    'adminDomains/addNetworkTarget',
+    async ({ companyId, domainId, payload }, { dispatch, rejectWithValue }) => {
+        try {
+            await apiRequest.post(`/admin/domains/${domainId}/network-targets`, payload, API_CONFIG);
+            toast.success('Target IP added');
+            await dispatch(fetchNetworkTargets({ companyId, domainId }));
+            return { companyId, domainId };
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue({ companyId, error: errorOf(e) });
+        }
+    },
+);
+
+export const updateNetworkTarget = createAsyncThunk(
+    'adminDomains/updateNetworkTarget',
+    async ({ companyId, domainId, targetId, payload }, { dispatch, rejectWithValue }) => {
+        try {
+            await apiRequest.put(`/admin/network-targets/${targetId}`, payload, API_CONFIG);
+            toast.success('Target IP updated');
+            await dispatch(fetchNetworkTargets({ companyId, domainId }));
+            return { companyId, domainId };
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue({ companyId, error: errorOf(e) });
+        }
+    },
+);
+
+export const removeNetworkTarget = createAsyncThunk(
+    'adminDomains/removeNetworkTarget',
+    async ({ companyId, domainId, targetId }, { dispatch, rejectWithValue }) => {
+        try {
+            await apiRequest.delete(`/admin/network-targets/${targetId}`, API_CONFIG);
+            toast.success('Target IP removed');
+            await dispatch(fetchNetworkTargets({ companyId, domainId }));
+            return { companyId, domainId };
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue({ companyId, error: errorOf(e) });
+        }
+    },
+);
+
 // ── Slice ─────────────────────────────────────────────────────────────────
 
 const slice = createSlice({
@@ -161,6 +222,11 @@ const slice = createSlice({
             .addCase(removeDomain.fulfilled, (s, a) => {
                 const slot = s.byCompany[a.payload.companyId];
                 if (slot) slot.list = (slot.list ?? []).filter((d) => d.id !== a.payload.domainId);
+            })
+
+            .addCase(fetchNetworkTargets.fulfilled, (s, a) => {
+                const { companyId, domainId, targets } = a.payload;
+                patchDomain(s, companyId, { id: domainId, network_targets: targets });
             });
     },
 });
