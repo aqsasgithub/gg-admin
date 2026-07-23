@@ -140,6 +140,21 @@ export const addNetworkTarget = createAsyncThunk(
     },
 );
 
+export const replaceNetworkTarget = createAsyncThunk(
+    'adminDomains/replaceNetworkTarget',
+    async ({ companyId, domainId, payload }, { dispatch, rejectWithValue }) => {
+        try {
+            await apiRequest.put(`/admin/domains/${domainId}/network-target`, payload, API_CONFIG);
+            toast.success('Target IP saved');
+            await dispatch(fetchNetworkTargets({ companyId, domainId }));
+            return { companyId, domainId };
+        } catch (e) {
+            toast.error(errorOf(e));
+            return rejectWithValue({ companyId, error: errorOf(e) });
+        }
+    },
+);
+
 export const updateNetworkTarget = createAsyncThunk(
     'adminDomains/updateNetworkTarget',
     async ({ companyId, domainId, targetId, payload }, { dispatch, rejectWithValue }) => {

@@ -22,7 +22,7 @@ import {
 import { revokeLicense, approveLicenseApplication, rejectLicenseApplication } from '../features/admin/adminLicenseApplicationsSlice';
 import {
     fetchCompanyDomains, addCompanyDomain, bulkAddDomains,
-    toggleDomainScope, removeDomain, fetchNetworkTargets,
+    toggleDomainScope, removeDomain,
     selectCompanyDomains, selectCompanyDomainsLicense, selectCompanyDomainsLoading,
 } from '../features/admin/adminDomainsSlice';
 import {
@@ -32,7 +32,7 @@ import {
 import LicensePlanBadge from '../components/admin/LicensePlanBadge';
 import ModuleEntitlementsGrid from '../components/admin/ModuleEntitlementsGrid';
 import AdminConfirmModal from '../components/admin/AdminConfirmModal';
-import NetworkTargetsModal from '../components/admin/NetworkTargetsModal';
+import NetworkTargetsPanel from '../components/admin/NetworkTargetsPanel';
 import CompanyUsersTab from '../components/admin/CompanyUsersTab';
 import CompanyAssetsTab from '../components/admin/CompanyAssetsTab';
 import CompanyAlertsTab from '../components/admin/CompanyAlertsTab';
@@ -310,7 +310,6 @@ function DomainsTab({ companyId }) {
     const [showAdd,  setShowAdd]  = useState(false);
     const [showBulk, setShowBulk] = useState(false);
     const [confirm,  setConfirm]  = useState(null);
-    const [ipModal,  setIpModal]  = useState(null);
 
     useEffect(() => { dispatch(fetchCompanyDomains({ companyId })); }, [dispatch, companyId]);
 
@@ -373,16 +372,7 @@ function DomainsTab({ companyId }) {
                                             : <ToggleRight size={20} className="text-emerald-600" />}
                                     </button>
                                 </td>
-                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                    <button type="button"
-                                        onClick={() => { setIpModal(d); dispatch(fetchNetworkTargets({ companyId, domainId: d.id })); }}
-                                        className="inline-flex items-center gap-1 px-2 py-1 mr-1 rounded text-xs text-slate-600 hover:bg-slate-100"
-                                        title="Network Security target IPs">
-                                        <Wifi size={13} />
-                                        {Array.isArray(d.network_targets) && d.network_targets.length > 0
-                                            ? `${d.network_targets.filter((t) => t.is_active).length} IP`
-                                            : 'IPs'}
-                                    </button>
+                                <td className="px-3 py-2.5 text-right">
                                     <button type="button" onClick={() => setConfirm({ type: 'delete', domain: d })}
                                         className="p-1.5 rounded hover:bg-red-50 text-red-600">
                                         <Trash2 size={14} />
@@ -415,12 +405,7 @@ function DomainsTab({ companyId }) {
                     setConfirm(null);
                 }} />
 
-            <NetworkTargetsModal
-                open={!!ipModal}
-                companyId={companyId}
-                domain={ipModal ? (list.find((d) => d.id === ipModal.id) ?? ipModal) : null}
-                onClose={() => setIpModal(null)}
-            />
+            <NetworkTargetsPanel companyId={companyId} domains={list} />
         </div>
     );
 }
