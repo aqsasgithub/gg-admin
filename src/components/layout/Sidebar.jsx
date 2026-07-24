@@ -5,7 +5,7 @@ import {
     CreditCard, Server, ScrollText, Activity, AlertTriangle, ScanLine,
     Mail, Trash2, Plug, BugPlay, ToggleRight, Megaphone, Heart, ListTree,
     UserCog, DollarSign, Tag, Power, Ticket, Clock, ShieldCheck, Layers,
-    ShieldHalf, Radio, Gauge, ClipboardCheck,
+    ShieldHalf, Radio, Gauge, ClipboardCheck, Radar,
 } from 'lucide-react';
 import { selectAdminCapabilities, selectAdminRoles } from '../../features/auth/authSlice';
 
@@ -50,6 +50,7 @@ const GROUPS = [
             { to: '/takedowns',    label: 'Takedowns',      icon: Sword,         cap: 'takedowns.read' },
             { to: '/scans',        label: 'Scans',          icon: ScanLine,      cap: 'scans.read' },
             { to: '/scan-control', label: 'Scan control',   icon: Power,         cap: 'scans.control' },
+            { to: '/threat-intelligence', label: 'Threat Intel', icon: Radar,   cap: 'threat_intel.read' },
         ],
     },
     {

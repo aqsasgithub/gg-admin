@@ -69,6 +69,11 @@ import adminContext       from '../features/admin/adminContextSlice';
 // adminNotifications, which is the cross-tenant delivery LOG.
 import meNotifications    from '../features/admin/meNotificationsSlice';
 
+// Threat Intelligence — aggregated indicator feed. Not a scanner: the
+// server projects fake domains, abusive IPs and analyst-curated manual
+// indicators into one canonical shape, so this slice is read-only.
+import threatIntel       from '../features/admin/threatIntelSlice';
+
 import { setAuthHandlers } from '../api/client';
 
 export const store = configureStore({
@@ -124,6 +129,8 @@ export const store = configureStore({
         adminContext,
         // Operator notification center ("my bell")
         meNotifications,
+        // Threat Intelligence feed
+        threatIntel,
     },
 });
 
