@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Link, useNavigate } from 'react-router-dom';
-import { Radar, Search, RefreshCcw, Building2, X, ExternalLink, ScanLine, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Radar, Search, RefreshCcw, Building2, X, ExternalLink, ScanLine, Plus, Trash2, ChevronLeft, ChevronRight, Share2, RotateCw } from 'lucide-react';
 import AdminConfirmModal from '../components/admin/AdminConfirmModal';
 import {
     searchThreatIntelCompanies, fetchThreatIndicators, rescanThreatIntelSources,
@@ -12,6 +12,7 @@ import {
     selectTiFilters, selectTiSelected, selectTiRescanning, selectTiRescanError,
     setThreatIntelPage, askDeleteThreatIndicator, cancelDeleteThreatIndicator,
     deleteThreatIndicator, selectTiPage, selectTiPendingDelete, selectTiDeletingId,
+    fetchMispStatus, syncCompanyToMisp, selectTiMispStatus, selectTiMispSyncing,
 } from '../features/admin/threatIntelSlice';
 import { selectAdminCapabilities } from '../features/auth/authSlice';
 import { setCompany as setAdminContextCompany } from '../features/admin/adminContextSlice';
@@ -77,6 +78,8 @@ export default function ThreatIntelligencePage() {
     const page           = useSelector(selectTiPage);
     const pendingDelete  = useSelector(selectTiPendingDelete);
     const deletingId     = useSelector(selectTiDeletingId);
+    const mispStatus     = useSelector(selectTiMispStatus);
+    const mispSyncing    = useSelector(selectTiMispSyncing);
     const rescanError    = useSelector(selectTiRescanError);
     const caps           = useSelector(selectAdminCapabilities);
 
@@ -87,6 +90,9 @@ export default function ThreatIntelligencePage() {
     // Deletion mutates the underlying scan data, so it is gated on the
     // separate write capability — support/viewer keep read-only access.
     const canDelete = caps.includes('*') || caps.includes('threat_intel.write');
+    // Pushing indicators to PTA MISP is an outbound action, gated on its
+    // own capability (owner). The panel is hidden for everyone else.
+    const canMisp = caps.includes('*') || caps.includes('misp.sync');
 
     const navigate              = useNavigate();
     const [term, setTerm]       = useState('');
@@ -150,6 +156,12 @@ export default function ThreatIntelligencePage() {
     useEffect(() => {
         dispatch(fetchThreatIndicators({ companyId: company?.id ?? null, filters, page }));
     }, [dispatch, company, filters, page]);
+
+    // MISP sync state is per-company, so it is only meaningful once a company
+    // is selected. Fetched only when the operator can act on it.
+    useEffect(() => {
+        if (canMisp && company?.id) dispatch(fetchMispStatus(company.id));
+    }, [dispatch, canMisp, company]);
 
     const pick = (c) => {
         skipSearchRef.current = true;
@@ -354,6 +366,57 @@ export default function ThreatIntelligencePage() {
                                 ` · +${meta.monitored_domains_total - meta.monitored_domains.length} more`
                             )}
                         </p>
+                    )}
+
+                    {/* PTA MISP synchronization. Company-scoped and owner-only.
+                        Pushes this company's indicators to PTA's MISP instance;
+                        the sync runs on the queue, so this only triggers it and
+                        reflects the resulting per-status counts. */}
+                    {canMisp && company && (
+                        <div className="flex items-center justify-between gap-3 flex-wrap border border-slate-200 rounded-md px-3 py-2 bg-slate-50">
+                            <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
+                                <Share2 size={14} className="text-slate-500" />
+                                <span className="font-medium text-slate-700">PTA MISP</span>
+                                {mispStatus?.mode && (
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                        mispStatus.mode === 'production'
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-slate-200 text-slate-600'
+                                    }`}>
+                                        {mispStatus.mode === 'production' ? 'live' : 'development'}
+                                    </span>
+                                )}
+                                {mispStatus?.counts && (
+                                    <span className="text-slate-500">
+                                        {mispStatus.counts.synced} synced · {mispStatus.counts.pending} pending
+                                        {mispStatus.counts.processing > 0 && ` · ${mispStatus.counts.processing} syncing`}
+                                        {mispStatus.counts.failed > 0 && ` · ${mispStatus.counts.failed} failed`}
+                                        {typeof mispStatus.total === 'number' && ` · ${mispStatus.total} total`}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {(mispStatus?.counts?.failed ?? 0) > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => dispatch(syncCompanyToMisp({ companyId: company.id, retry: true }))}
+                                        disabled={mispSyncing}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-slate-300 rounded-md hover:bg-white disabled:opacity-50"
+                                    >
+                                        <RotateCw size={13} className={mispSyncing ? 'animate-spin' : ''} /> Retry failed
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => dispatch(syncCompanyToMisp({ companyId: company.id }))}
+                                    disabled={mispSyncing}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-guardian-navy text-guardian-navy rounded-md hover:bg-white disabled:opacity-50"
+                                    title="Push this company's indicators to PTA MISP"
+                                >
+                                    <Share2 size={13} /> {mispSyncing ? 'Queuing…' : 'Sync to MISP'}
+                                </button>
+                            </div>
+                        </div>
                     )}
 
                     <div className="flex items-center gap-2 flex-wrap">

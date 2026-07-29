@@ -206,6 +206,42 @@ export const deleteThreatIndicator = createAsyncThunk(
     },
 );
 
+/* ─── PTA MISP synchronization ─────────────────────────────────────────
+ * Pushes the current company's Threat Intelligence indicators to PTA's MISP
+ * instance. Queued server-side (SyncIndicatorsToMispJob); these thunks just
+ * trigger and poll status. Gated on the misp.sync capability (owner).
+ * ------------------------------------------------------------------------ */
+
+export const fetchMispStatus = createAsyncThunk(
+    'threatIntel/mispStatus',
+    async (companyId, { rejectWithValue }) => {
+        try {
+            const res = await apiRequest.get('/admin/misp/status', {
+                ...CFG, params: { company_id: companyId },
+            });
+            return res.data?.data ?? null;
+        } catch (e) { return rejectWithValue(errOf(e)); }
+    },
+);
+
+export const syncCompanyToMisp = createAsyncThunk(
+    'threatIntel/mispSync',
+    async ({ companyId, retry = false }, { dispatch, rejectWithValue }) => {
+        try {
+            const path = retry ? '/admin/misp/retry' : '/admin/misp/sync';
+            await apiRequest.post(path, { company_id: companyId }, CFG);
+            toast.success(retry ? 'MISP retry queued' : 'MISP sync queued');
+            // The job runs async; poll status shortly after so counts move.
+            setTimeout(() => dispatch(fetchMispStatus(companyId)), 1500);
+            return true;
+        } catch (e) {
+            const msg = errOf(e);
+            toast.error(msg);
+            return rejectWithValue(msg);
+        }
+    },
+);
+
 const initialState = {
     // Company search
     companyResults:  [],
@@ -233,6 +269,10 @@ const initialState = {
     // Indicator pending confirmation, and the id currently being deleted
     pendingDelete:   null,
     deletingId:      null,
+
+    // PTA MISP sync
+    mispStatus:      null,
+    mispSyncing:     false,
 };
 
 const slice = createSlice({
@@ -315,7 +355,12 @@ const slice = createSlice({
                 // so nothing stale remains on screen.
                 s.selected   = null;
             })
-            .addCase(deleteThreatIndicator.rejected,  (s, a) => { s.deletingId = null; s.error = a.payload; });
+            .addCase(deleteThreatIndicator.rejected,  (s, a) => { s.deletingId = null; s.error = a.payload; })
+
+            .addCase(fetchMispStatus.fulfilled, (s, a) => { s.mispStatus = a.payload; })
+            .addCase(syncCompanyToMisp.pending,   (s) => { s.mispSyncing = true; })
+            .addCase(syncCompanyToMisp.fulfilled, (s) => { s.mispSyncing = false; })
+            .addCase(syncCompanyToMisp.rejected,  (s) => { s.mispSyncing = false; });
     },
 });
 
@@ -345,5 +390,7 @@ export const selectTiRescanError    = (st) => st.threatIntel.rescanError;
 export const selectTiPage           = (st) => st.threatIntel.page;
 export const selectTiPendingDelete  = (st) => st.threatIntel.pendingDelete;
 export const selectTiDeletingId     = (st) => st.threatIntel.deletingId;
+export const selectTiMispStatus     = (st) => st.threatIntel.mispStatus;
+export const selectTiMispSyncing    = (st) => st.threatIntel.mispSyncing;
 
 export default slice.reducer;
