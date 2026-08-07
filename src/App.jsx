@@ -52,6 +52,7 @@ import LoginHistoryPage          from './pages/LoginHistoryPage';
 // Threat Intelligence — aggregated indicator feed (fake domains, abusive
 // IPs, analyst-curated manual indicators). Search-first: opens empty.
 import ThreatIntelligencePage   from './pages/ThreatIntelligencePage';
+import EmailLogsPage            from './pages/EmailLogsPage';
 
 // Pass 3 — module data CRUD (Brand Protection first; subsequent
 // modules reuse ModuleDatasetPage with a different module slug).
@@ -124,6 +125,7 @@ export default function App() {
                     <Route path="/scans/:id"          element={<ScanDetailPage />} />
                     <Route path="/scan-control"       element={<ScanControlPage />} />
                     <Route path="/threat-intelligence" element={<ThreatIntelligencePage />} />
+                    <Route path="/email-logs" element={<EmailLogsPage />} />
 
                     {/* Platform & ops */}
                     <Route path="/api-health"         element={<ApiHealthPage />} />

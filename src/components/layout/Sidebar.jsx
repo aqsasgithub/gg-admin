@@ -51,6 +51,7 @@ const GROUPS = [
             { to: '/scans',        label: 'Scans',          icon: ScanLine,      cap: 'scans.read' },
             { to: '/scan-control', label: 'Scan control',   icon: Power,         cap: 'scans.control' },
             { to: '/threat-intelligence', label: 'Threat Intel', icon: Radar,   cap: 'threat_intel.read' },
+            { to: '/email-logs', label: 'Email logs', icon: Mail, cap: 'email_logs.read' },
         ],
     },
     {

@@ -73,6 +73,7 @@ import meNotifications    from '../features/admin/meNotificationsSlice';
 // server projects fake domains, abusive IPs and analyst-curated manual
 // indicators into one canonical shape, so this slice is read-only.
 import threatIntel       from '../features/admin/threatIntelSlice';
+import emailLogs        from '../features/admin/emailLogsSlice';
 
 import { setAuthHandlers } from '../api/client';
 
@@ -131,6 +132,7 @@ export const store = configureStore({
         meNotifications,
         // Threat Intelligence feed
         threatIntel,
+        emailLogs,
     },
 });
 
