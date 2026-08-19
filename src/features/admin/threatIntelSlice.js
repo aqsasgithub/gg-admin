@@ -224,16 +224,133 @@ export const fetchMispStatus = createAsyncThunk(
     },
 );
 
+/*
+ * Trigger a sync (or retry) and drive it to a TERMINAL state.
+ *
+ * The server runs the batch inline when QUEUE_CONNECTION=sync and on the queue
+ * otherwise, and reports which happened via `queued`. Inline runs come back
+ * with the real summary, so no polling is needed. Queued runs are polled — but
+ * with a HARD CEILING, because the previous single fire-and-forget poll is what
+ * left the badge showing a syncing count that never resolved.
+ *
+ * The thunk always settles: every path either fulfils or rejects, so the
+ * `mispSyncing` flag can never be left stuck on.
+ */
+const MISP_POLL_INTERVAL_MS = 2500;
+const MISP_POLL_MAX_ATTEMPTS = 24;      // ~60s ceiling
+
+/*
+ * A MISP batch is bounded server-side and returns `outcome: 'partial'`
+ * when indicators remain. Two settings make that work end to end:
+ *
+ *  - MISP_SYNC_TIMEOUT_MS overrides the client's global 30s HTTP timeout
+ *    for THIS request only. The batch legitimately runs for tens of
+ *    seconds (each MISP attribute push is a separate ~1.5s round trip),
+ *    and the default timeout was aborting the XHR while the server was
+ *    still working — surfacing 'timeout of 30000ms exceeded' even though
+ *    the sync was succeeding and committing progress.
+ *
+ *  - MISP_SYNC_MAX_BATCHES bounds the auto-continuation below, so a
+ *    company with hundreds of indicators completes without the operator
+ *    clicking repeatedly, while a pathological loop still terminates.
+ */
+const MISP_SYNC_TIMEOUT_MS  = 120_000;
+const MISP_SYNC_MAX_BATCHES = 20;
+
 export const syncCompanyToMisp = createAsyncThunk(
     'threatIntel/mispSync',
     async ({ companyId, retry = false }, { dispatch, rejectWithValue }) => {
         try {
             const path = retry ? '/admin/misp/retry' : '/admin/misp/sync';
-            await apiRequest.post(path, { company_id: companyId }, CFG);
+            const cfg  = { ...CFG, timeout: MISP_SYNC_TIMEOUT_MS };
+            const res  = await apiRequest.post(path, { company_id: companyId }, cfg);
+            let data   = res.data?.data ?? {};
+
+            // Inline execution — the batch already finished. Refresh once and
+            // report the concrete outcome rather than a vague 'queued'.
+            if (data.queued === false) {
+                // Drive successive bounded batches until the work is done.
+                // Each call commits its own progress, so an interruption at any
+                // point simply leaves the remainder pending for the next run.
+                let batches = 1;
+                while (data.outcome === 'partial' && batches < MISP_SYNC_MAX_BATCHES) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await dispatch(fetchMispStatus(companyId));
+                    // eslint-disable-next-line no-await-in-loop
+                    const next = await apiRequest.post(path, { company_id: companyId }, cfg);
+                    data = next.data?.data ?? {};
+                    batches += 1;
+
+                    // Defensive: a batch that reports partial but moved nothing
+                    // would otherwise spin. Stop and let the operator retry.
+                    if ((data.synced ?? 0) === 0 && (data.failed ?? 0) === 0) break;
+                }
+
+                await dispatch(fetchMispStatus(companyId));
+
+                if (data.outcome === 'partial') {
+                    toast.success(
+                        `${data.deferred ?? 0} indicators still pending — run Sync again to continue`,
+                    );
+                } else if (data.outcome === 'auth_failed') {
+                    toast.error('MISP rejected the API key — sync stopped');
+                } else if (data.outcome === 'event_failed') {
+                    toast.error('MISP event could not be created — nothing was sent');
+                } else if (data.outcome === 'nothing_pending') {
+                    toast.success('Everything is already in sync');
+                } else {
+                    // `duplicate` is a SUBSET of `synced` (attributes MISP
+                    // already held), never a separate or failure bucket.
+                    const parts = [`${data.synced ?? 0} synced`];
+                    if (data.duplicate) parts.push(`${data.duplicate} already in MISP`);
+                    if (data.failed) parts.push(`${data.failed} failed`);
+                    toast.success(parts.join(' · '));
+                }
+                return data;
+            }
+
+            // Queued execution — poll until the counts stop moving or the
+            // ceiling is hit. Either way this resolves; it never hangs.
             toast.success(retry ? 'MISP retry queued' : 'MISP sync queued');
-            // The job runs async; poll status shortly after so counts move.
-            setTimeout(() => dispatch(fetchMispStatus(companyId)), 1500);
-            return true;
+
+            for (let i = 0; i < MISP_POLL_MAX_ATTEMPTS; i += 1) {
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise((r) => setTimeout(r, MISP_POLL_INTERVAL_MS));
+                // eslint-disable-next-line no-await-in-loop
+                const st = await dispatch(fetchMispStatus(companyId)).unwrap().catch(() => null);
+                const counts = st?.counts;
+                if (!counts) break;
+
+                // Terminal when nothing is genuinely in flight and nothing is
+                // left waiting. `syncing` already excludes reclaimable orphans,
+                // so a stranded row cannot keep this loop alive.
+                if ((counts.syncing ?? 0) === 0 && (counts.pending ?? 0) === 0) break;
+            }
+            return data;
+        } catch (e) {
+            const msg = errOf(e);
+            toast.error(msg);
+            return rejectWithValue(msg);
+        }
+    },
+);
+
+/*
+ * LOCAL-ONLY: clear this company's MISP sync-tracking rows.
+ *
+ * Only rendered when the server reports `reset_available`, which is true solely
+ * in the local environment. The route does not exist in production, so a stale
+ * client cannot reach it either.
+ */
+export const resetMispTracking = createAsyncThunk(
+    'threatIntel/mispResetTracking',
+    async (companyId, { dispatch, rejectWithValue }) => {
+        try {
+            const res = await apiRequest.post('/admin/misp/reset-tracking', { company_id: companyId }, CFG);
+            const deleted = res.data?.data?.deleted ?? 0;
+            toast.success(`Cleared ${deleted} sync-tracking record${deleted === 1 ? '' : 's'}`);
+            await dispatch(fetchMispStatus(companyId));
+            return deleted;
         } catch (e) {
             const msg = errOf(e);
             toast.error(msg);
@@ -273,6 +390,7 @@ const initialState = {
     // PTA MISP sync
     mispStatus:      null,
     mispSyncing:     false,
+    mispResetting:   false,
 };
 
 const slice = createSlice({
@@ -360,7 +478,10 @@ const slice = createSlice({
             .addCase(fetchMispStatus.fulfilled, (s, a) => { s.mispStatus = a.payload; })
             .addCase(syncCompanyToMisp.pending,   (s) => { s.mispSyncing = true; })
             .addCase(syncCompanyToMisp.fulfilled, (s) => { s.mispSyncing = false; })
-            .addCase(syncCompanyToMisp.rejected,  (s) => { s.mispSyncing = false; });
+            .addCase(syncCompanyToMisp.rejected,  (s) => { s.mispSyncing = false; })
+            .addCase(resetMispTracking.pending,   (s) => { s.mispResetting = true; })
+            .addCase(resetMispTracking.fulfilled, (s) => { s.mispResetting = false; })
+            .addCase(resetMispTracking.rejected,  (s) => { s.mispResetting = false; });
     },
 });
 
@@ -392,5 +513,6 @@ export const selectTiPendingDelete  = (st) => st.threatIntel.pendingDelete;
 export const selectTiDeletingId     = (st) => st.threatIntel.deletingId;
 export const selectTiMispStatus     = (st) => st.threatIntel.mispStatus;
 export const selectTiMispSyncing    = (st) => st.threatIntel.mispSyncing;
+export const selectTiMispResetting  = (st) => st.threatIntel.mispResetting;
 
 export default slice.reducer;

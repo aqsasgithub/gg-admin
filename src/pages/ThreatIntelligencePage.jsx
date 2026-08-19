@@ -13,6 +13,7 @@ import {
     setThreatIntelPage, askDeleteThreatIndicator, cancelDeleteThreatIndicator,
     deleteThreatIndicator, selectTiPage, selectTiPendingDelete, selectTiDeletingId,
     fetchMispStatus, syncCompanyToMisp, selectTiMispStatus, selectTiMispSyncing,
+    resetMispTracking, selectTiMispResetting,
 } from '../features/admin/threatIntelSlice';
 import { selectAdminCapabilities } from '../features/auth/authSlice';
 import { setCompany as setAdminContextCompany } from '../features/admin/adminContextSlice';
@@ -80,6 +81,7 @@ export default function ThreatIntelligencePage() {
     const deletingId     = useSelector(selectTiDeletingId);
     const mispStatus     = useSelector(selectTiMispStatus);
     const mispSyncing    = useSelector(selectTiMispSyncing);
+    const mispResetting  = useSelector(selectTiMispResetting);
     const rescanError    = useSelector(selectTiRescanError);
     const caps           = useSelector(selectAdminCapabilities);
 
@@ -388,15 +390,36 @@ export default function ThreatIntelligencePage() {
                                 )}
                                 {mispStatus?.counts && (
                                     <span className="text-slate-500">
-                                        {mispStatus.counts.synced} synced · {mispStatus.counts.pending} pending
-                                        {mispStatus.counts.processing > 0 && ` · ${mispStatus.counts.processing} syncing`}
+                                        {/* Attributes MISP reported as already present on the event
+                                            are SYNCED and are counted here. Legacy rows written under
+                                            the retired `duplicate` status are folded in server-side,
+                                            so this figure is the true completed total. */}
+                                        {mispStatus.counts.synced} synced
+                                        {` · ${mispStatus.counts.pending} pending`}
+                                        {/* `syncing` counts only genuinely in-flight indicators. Rows
+                                            orphaned by an interrupted run are reported separately as
+                                            `stale` so the badge can never sit on a spinner that will
+                                            never resolve. */}
+                                        {mispStatus.counts.syncing > 0 && ` · ${mispStatus.counts.syncing} syncing`}
                                         {mispStatus.counts.failed > 0 && ` · ${mispStatus.counts.failed} failed`}
                                         {typeof mispStatus.total === 'number' && ` · ${mispStatus.total} total`}
                                     </span>
                                 )}
+                                {(mispStatus?.counts?.stale ?? 0) > 0 && (
+                                    <span
+                                        className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700"
+                                        title="Interrupted by a previous run. These are released automatically on the next sync or retry."
+                                    >
+                                        {mispStatus.counts.stale} interrupted
+                                    </span>
+                                )}
                             </div>
                             <div className="flex items-center gap-2">
-                                {(mispStatus?.counts?.failed ?? 0) > 0 && (
+                                {/* Retry is offered for genuine failures AND for indicators
+                                    stranded by an interrupted run, since both are recoverable
+                                    by re-running the real push. */}
+                                {((mispStatus?.counts?.failed ?? 0) > 0
+                                  || (mispStatus?.counts?.stale ?? 0) > 0) && (
                                     <button
                                         type="button"
                                         onClick={() => dispatch(syncCompanyToMisp({ companyId: company.id, retry: true }))}
@@ -413,8 +436,33 @@ export default function ThreatIntelligencePage() {
                                     className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-guardian-navy text-guardian-navy rounded-md hover:bg-white disabled:opacity-50"
                                     title="Push this company's indicators to PTA MISP"
                                 >
-                                    <Share2 size={13} /> {mispSyncing ? 'Queuing…' : 'Sync to MISP'}
+                                    <Share2 size={13} /> {mispSyncing ? 'Syncing…' : 'Sync to MISP'}
                                 </button>
+                                {/* LOCAL-ONLY. Rendered only when the server reports
+                                    reset_available, which is true solely when APP_ENV=local.
+                                    This is a convenience, not the control: the route is not
+                                    registered in production and the controller and service
+                                    both refuse the operation, so hiding the button is the
+                                    least important of the three guards. */}
+                                {mispStatus?.reset_available && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (window.confirm(
+                                                'Clear local MISP sync-tracking for this company?\n\n'
+                                                + 'This only clears our record of what was pushed. '
+                                                + 'Threat Intelligence findings are not modified and '
+                                                + 'nothing is removed from MISP.',
+                                            )) dispatch(resetMispTracking(company.id));
+                                        }}
+                                        disabled={mispResetting || mispSyncing}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-amber-400 text-amber-700 rounded-md hover:bg-white disabled:opacity-50"
+                                        title="Local only — clears this company's sync-tracking records"
+                                    >
+                                        <RotateCw size={13} className={mispResetting ? 'animate-spin' : ''} />
+                                        {mispResetting ? 'Resetting…' : 'Reset Sync Tracking'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}

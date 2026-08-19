@@ -16,10 +16,15 @@ import { selectAdminCapabilities } from '../features/auth/authSlice';
  *
  *   /email-logs
  *
- * Central record of every outgoing email with its Mailjet lifecycle
- * (pending → sent → delivered → opened/clicked, or bounced/blocked/spam).
+ * Central record of every outgoing email with its delivery lifecycle
+ * (pending → sent → delivered → opened/clicked, or bounced/blocked/spam/
+ * deferred). The lifecycle is PROVIDER-NEUTRAL: whichever provider is active
+ * (Mailjet, Brevo, Postmark or SMTP2GO) reports its own events, which the server
+ * normalises into the single status vocabulary rendered here.
+ *
  * Failed/bounced messages can be resent (owner only); a resend creates a new
- * linked record so the audit chain is preserved.
+ * linked record so the audit chain is preserved, and always goes out through
+ * the CURRENTLY configured provider.
  */
 
 const STATUS_STYLES = {
@@ -38,6 +43,17 @@ const STATUS_STYLES = {
 };
 
 const RESENDABLE = ['failed', 'bounced', 'blocked', 'spam', 'deferred'];
+
+// How each webhook-processing outcome reads in the event list. 'duplicate' is
+// a provider redelivery that idempotency correctly discarded — informational,
+// not an error.
+const RESULT_TONE = {
+    applied:   'text-emerald-600',
+    ignored:   'text-slate-400',
+    duplicate: 'text-sky-600',
+    unmatched: 'text-amber-600',
+    error:     'text-red-600',
+};
 
 function StatusPill({ status }) {
     const cls = STATUS_STYLES[status] || 'bg-slate-100 text-slate-700 ring-slate-200';
@@ -213,6 +229,12 @@ function EmailDetail({ log, canResend, resending, onResend, onClose }) {
         : (Array.isArray(log.webhook_events) ? log.webhook_events : []);
     const attachments = Array.isArray(log.attachments) ? log.attachments : [];
 
+    // Sender identity, persisted per-message so a historical email shows the
+    // address it actually went out under rather than today's MAIL_FROM_ADDRESS.
+    const fromLabel = log.from_address
+        ? (log.from_name ? `${log.from_name} <${log.from_address}>` : log.from_address)
+        : null;
+
     // Lifecycle timeline built from the log's own timestamps — always ordered.
     const timeline = [
         ['Created',   log.created_at],
@@ -241,6 +263,8 @@ function EmailDetail({ log, canResend, resending, onResend, onClose }) {
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                         <Field k="Provider" v={log.provider} />
                         <Field k="Mailer" v={log.mailer} />
+                        <Field k="From" v={fromLabel} />
+                        <Field k="Message-ID" v={log.smtp_message_id} />
                         <Field k="Message ID" v={log.provider_message_id} mono />
                         <Field k="Custom ID" v={log.custom_id} mono />
                         <Field k="Mail class" v={log.mail_class} mono />
@@ -277,7 +301,7 @@ function EmailDetail({ log, canResend, resending, onResend, onClose }) {
                                         <span className="font-mono text-[11px] px-1.5 py-0.5 bg-slate-100 rounded">{w.provider}</span>
                                         <span className="text-slate-700">{w.event_type}</span>
                                         {w.mapped_status && <StatusPill status={w.mapped_status} />}
-                                        <span className={`text-[10px] ${w.result === 'applied' ? 'text-emerald-600' : 'text-slate-400'}`}>{w.result}</span>
+                                        <span className={`text-[10px] ${RESULT_TONE[w.result] || 'text-slate-400'}`}>{w.result}</span>
                                         <span className="text-slate-400">{fmt(w.created_at)}</span>
                                     </li>
                                 ))}
