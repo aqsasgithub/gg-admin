@@ -108,7 +108,8 @@ function CompanyRow({ company: c, onChange }) {
     const [confirm, setConfirm] = useState(null);
     const [editing, setEditing] = useState(false);
 
-    const isSuspended = c.license?.status === 'suspended';
+    // companies.status is the canonical suspension flag (license may be absent).
+    const isSuspended = c.status === 'suspended' || c.license?.status === 'suspended';
 
     const doSuspend   = async (reason) => { await dispatch(suspendCompany({ companyId: c.id, reason })); setConfirm(null); onChange?.(); };
     const doReinstate = async ()      => { await dispatch(reinstateCompany(c.id));                    setConfirm(null); onChange?.(); };

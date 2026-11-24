@@ -158,6 +158,7 @@ export default function CompanyDetailPage() {
 
 function OverviewTab({ companyId, detail }) {
     const dispatch = useDispatch();
+    const navigate = useNavigate();
     const { company, license, stats, recent_activity, pending_application, applications_history } = detail;
     const [confirm, setConfirm] = useState(null);
 
@@ -180,7 +181,9 @@ function OverviewTab({ companyId, detail }) {
         setConfirm(null);
     };
 
-    const isSuspended = license?.status === 'suspended';
+    // companies.status is the canonical suspension flag; a company without a
+    // license can still be suspended, so don't rely on license.status alone.
+    const isSuspended = company?.status === 'suspended' || license?.status === 'suspended';
 
     return (
         <div className="space-y-4">
